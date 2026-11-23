@@ -59,6 +59,7 @@ game.setLang(lang);
 window.__slappy = game; // debug handle
 
 // ---------------- layout ----------------
+let uiZoom = 1;
 let dprCap = 2, capLocked = false, raisedAt = -1e9; // resolution cap, moved by game.watchFrame
 function fit() {
   const vw = window.innerWidth, vh = window.innerHeight;
@@ -67,7 +68,11 @@ function fit() {
   stage.style.width = cw + 'px'; stage.style.height = ch + 'px';
   const dpr = Math.min(window.devicePixelRatio || 1, dprCap);
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
-  ui.style.transform = `scale(${cw / W}, ${ch / H})`;
+  // zoom lays the menus out again at the real size, so text stays sharp; a scale() transform would stretch a
+  // bitmap of them, which turns blurry while anything inside animates (hovered buttons, the wiggling logo)
+  if (CSS.supports('zoom', '1')) ui.style.zoom = cw / W;
+  else ui.style.transform = `scale(${cw / W}, ${ch / H})`;
+  uiZoom = cw / W;
 }
 window.addEventListener('resize', fit);
 window.addEventListener('orientationchange', () => setTimeout(fit, 200));
@@ -412,7 +417,9 @@ function shopPreview(now) {
   if (screen !== 'shop') return;
   requestAnimationFrame(shopPreview);
   const cv = $('#shop-preview'), c = cv.getContext('2d'), sel = SKIN_BY_ID.get(shopSel);
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height);
+  const px = Math.round(260 * uiZoom * Math.min(window.devicePixelRatio || 1, 3)); // as many pixels as it covers
+  if (cv.width !== px) { cv.width = px; cv.height = Math.round(px * 440 / 520); }
+  c.setTransform(cv.width / 520, 0, 0, cv.width / 520, 0, 0); c.clearRect(0, 0, 520, 440);
   const cat = sel && sel.kind === 'cat' ? sel : SKIN.cat, mouse = sel && sel.kind === 'mouse' ? sel : SKIN.mouse;
   drawButt(c, 260, 220, { left: -1e6, right: -1e6, rightHeld: false }, now, lang, 1.15, { cat: cat || { hex: '#f39c34', dark: '#c96f1c' } });
   c.save(); c.translate(190, 425); c.scale(3, 3);
