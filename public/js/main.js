@@ -1,7 +1,7 @@
 // App shell: screens, input, accounts, leaderboards, results.
 import { Game } from './game.js';
 import { W, H, SKIN, drawButt, drawMouse } from './render.js';
-import { SKINS, SKIN_BY_ID, PATTERNS } from '../shared/skins.js';
+import { SKINS, SKIN_BY_ID, PATTERNS, DEFAULT } from '../shared/skins.js';
 import { bonusItem } from '../shared/sim.js';
 import * as audio from './audio.js';
 import { t as tr, STR } from './i18n.js';
@@ -397,8 +397,8 @@ function renderShop() {
   const sh = store.d.shop || { balance: 0, owned: [], cat: 'cat:ginger', mouse: 'mouse:mouse-grey' };
   $('#shop-sum').textContent = T('shopBalance', { n: sh.balance });
   for (const t of $$('#shop-tabs .tab')) t.classList.toggle('active', t.dataset.kind === shopKind);
-  const worn = sh[shopKind];
-  if (!shopSel || SKIN_BY_ID.get(shopSel).kind !== shopKind) shopSel = worn;
+  const worn = SKIN_BY_ID.has(sh[shopKind]) ? sh[shopKind] : DEFAULT[shopKind]; // cached shop may name a removed skin
+  if (!shopSel || SKIN_BY_ID.get(shopSel)?.kind !== shopKind) shopSel = worn;
   const owns = (s) => s.price === 0 || sh.owned.includes(s.id);
   let group = null;
   $('#shop-grid').innerHTML = SKINS.filter((s) => s.kind === shopKind).map((s) => {

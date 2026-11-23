@@ -333,8 +333,10 @@ async function readJson(req, limit = 200_000) {
 
 function shopOf(userId) {
   const w = q.wallet.get(userId);
+  // a skin that no longer exists in shared/skins.js (list regenerated) falls back to the free default
+  const worn = (id, kind) => (SKIN_BY_ID.has(id) ? id : DEFAULT_SKIN[kind]);
   return { balance: w.balance, earned: w.earned, owned: q.owned.all(userId).map((r) => r.item),
-    cat: w.skin_cat || DEFAULT_SKIN.cat, mouse: w.skin_mouse || DEFAULT_SKIN.mouse };
+    cat: worn(w.skin_cat, 'cat'), mouse: worn(w.skin_mouse, 'mouse') };
 }
 
 function auth(req) {

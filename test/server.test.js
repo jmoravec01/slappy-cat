@@ -17,9 +17,9 @@ process.env.RUN_TIME_RATIO = '0';
 process.env.GOLDFISH_ODDS = '1e9'; // no random goldfish, except in the goldfish test
 const { maps } = JSON.parse(readFileSync(new URL('../shared/maps.json', import.meta.url)));
 
-let server, base;
+let server, db, base;
 before(async () => {
-  ({ server } = await import('../server/server.js'));
+  ({ server, db } = await import('../server/server.js'));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -254,6 +254,8 @@ test('market: salmon from finished runs pay for colours, checked on the server',
   r = await req('POST', '/api/shop/equip', { item: 'cat:ginger' }, token);
   assert.equal(r.data.cat, 'cat:ginger', 'the default is always free to wear');
   assert.equal((await req('GET', '/api/me', null, token)).data.shop.mouse, 'mouse:pink');
+  db.prepare("UPDATE users SET skin_cat = 'cat:gone' WHERE name = 'Shopper'").run(); // skin list regenerated
+  assert.equal((await req('GET', '/api/shop', null, token)).data.cat, 'cat:ginger', 'a removed skin falls back to the default');
 });
 
 test('goldfish: secret roll per open ticket, revealed mid-run only, pays 10 and shows on the board', async () => {
