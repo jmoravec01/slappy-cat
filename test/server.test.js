@@ -72,7 +72,7 @@ test('register needs a valid proof of work', async () => {
   assert.equal(r.data.error, 'bad_challenge');
   r = await req('POST', '/api/register', { name: 'nopow', password: 'secret12', challenge: c.challenge, pow: '1' });
   assert.equal(r.data.error, 'bad_challenge');
-  r = await req('POST', '/api/register', { name: 'nopow', password: 'secret12', challenge: c.challenge.replace(/.$/, 'x'), pow: solvePow(c.challenge, c.bits) });
+  r = await req('POST', '/api/register', { name: 'nopow', password: 'secret12', challenge: c.challenge.replace(/.$/, (ch) => (ch === 'x' ? 'y' : 'x')), pow: solvePow(c.challenge, c.bits) });
   assert.equal(r.data.error, 'bad_challenge', 'forged signature');
   const pow = solvePow(c.challenge, c.bits);
   r = await req('POST', '/api/register', { name: 'withpow', password: 'secret12', challenge: c.challenge, pow });
