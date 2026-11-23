@@ -152,6 +152,7 @@ input:focus { background: #fffbe6; box-shadow: 3px 3px 0 var(--blue); }
 .sw { position: relative; height: 62px; border: 2px solid var(--ink); border-radius: 12px 10px 13px 9px; background: #fffaf0; cursor: pointer; font: inherit; font-size: 15px; padding: 2px; }
 .sw i { display: block; width: 30px; height: 30px; margin: 2px auto 1px; border-radius: 50%; border: 2px solid var(--ink); }
 .sw.sel { box-shadow: 0 0 0 3px var(--blue); }
+.shop-group { grid-column: 1 / -1; margin: 6px 0 0; font-size: 18px; font-weight: normal; border-bottom: 2px dashed rgba(0,0,0,0.2); }
 .sw.on { background: var(--yellow); }
 .sw.own:not(.on) { background: #e9f7e4; }
 .err { color: var(--red); min-height: 22px; margin: 0; font-size: 19px; }

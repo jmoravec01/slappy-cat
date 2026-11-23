@@ -409,7 +409,9 @@ export function drawMouse(ctx, x, by, o = {}) {
   const t = o.t || 0;
   const alpha = o.alpha ?? 1;
   ctx.save(); ctx.globalAlpha = alpha;
-  const body = o.ghost ? '#9fc3ff' : (o.pal || SKIN.mouse)?.hex || '#b8b2c8', ear = o.ghost ? '#cfe0ff' : '#f7a1b5', ink = o.ghost ? '#3d5a8c' : INK;
+  const pal = o.ghost ? null : o.pal || SKIN.mouse, mx = pal && pal.mix; // mx: second colour + pattern
+  const body = o.ghost ? '#9fc3ff' : pal?.hex || '#b8b2c8', ink = o.ghost ? '#3d5a8c' : INK;
+  const ear = o.ghost ? '#cfe0ff' : mx && mx.pat === 'points' ? mx.hex : '#f7a1b5';
   const seed = o.ghost ? 900 : 100;
   const cy = by - h / 2 - 1;
   const phase = Math.floor(t / 70) % 4;
@@ -423,10 +425,13 @@ export function drawMouse(ctx, x, by, o = {}) {
     line(ctx, x + 22, by - 3, x + 22 + l2, by + 1, seed + 3, 0.5, ink, 2);
   }
   // body
-  ellipse(ctx, x + 14, cy, 16, Math.max(7, h / 2 + 1), seed + 4, body, ink, 1, 2);
+  const ry = Math.max(7, h / 2 + 1);
+  ellipse(ctx, x + 14, cy, 16, ry, seed + 4, body, ink, 1, 2);
+  if (mx) mousePattern(ctx, mx, x + 14, cy, ry, seed);
   // head
   const hx = x + 28, hy = o.duck ? by - 8 : cy - 4;
-  ellipse(ctx, hx, hy, 10, 9, seed + 5, body, ink, 0.8, 2);
+  ellipse(ctx, hx, hy, 10, 9, seed + 5, mx && mx.pat === 'points' ? mx.hex : body, ink, 0.8, 2);
+  if (mx && mx.pat === 'patches') { ctx.fillStyle = mx.hex; ctx.beginPath(); ctx.ellipse(hx - 2, hy - 2, 4, 3.5, 0.4, 0, Math.PI * 2); ctx.fill(); }
   ellipse(ctx, hx - 4, hy - (o.duck ? 7 : 10), 6, 6, seed + 6, ear, ink, 0.6, 1.8);
   // nose + eye
   ctx.fillStyle = '#ff6f91'; ctx.beginPath(); ctx.arc(hx + 10, hy + 1, 2.6, 0, Math.PI * 2); ctx.fill();
@@ -438,6 +443,17 @@ export function drawMouse(ctx, x, by, o = {}) {
   // whiskers
   line(ctx, hx + 9, hy + 2, hx + 18, hy - 1, seed + 9, 0.4, ink, 1);
   line(ctx, hx + 9, hy + 3, hx + 18, hy + 5, seed + 10, 0.4, ink, 1);
+  ctx.restore();
+}
+
+// second colour on the mouse's body, clipped to the body ellipse
+function mousePattern(ctx, mx, cx, cy, ry, seed) {
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, 15, ry - 1, 0, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = mx.hex; ctx.strokeStyle = mx.hex; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  if (mx.pat === 'tabby') { ctx.beginPath(); for (const dx of [-7, 0, 7]) { ctx.moveTo(cx + dx - 2, cy - ry); ctx.lineTo(cx + dx + 2, cy + ry * 0.2); } ctx.stroke(); }
+  else if (mx.pat === 'twotone') ctx.fillRect(cx - 16, cy + ry * 0.15, 32, ry); // belly
+  else if (mx.pat === 'patches') { ctx.beginPath(); ctx.ellipse(cx - 5, cy - 2, 5, 4, 0.5, 0, Math.PI * 2); ctx.ellipse(cx + 6, cy + 3, 3.5, 3, 0, 0, Math.PI * 2); ctx.fill(); }
+  else if (mx.pat === 'points') { ctx.beginPath(); ctx.ellipse(cx - 15, cy, 6, ry, 0, 0, Math.PI * 2); ctx.fill(); } // darker rump
   ctx.restore();
 }
 
@@ -515,32 +531,44 @@ function slapBurst(ctx, x, y, age, seed, rot) {
 
 function drawButtInner(ctx, cx, cy, st, now, o = {}) {
   const pal = o.cat || SKIN.cat, orange = pal ? pal.hex : '#f39c34', dark = pal ? pal.dark : '#c96f1c';
+  // mixes put the second colour (B) on: stripes (tabby), head/ears/paws/tail (points), cheeks/paws (two-tone), blobs (patches)
+  const mx = pal && pal.mix, B = mx && mx.hex, pat = mx ? mx.pat : '';
+  const earC = pat === 'points' ? B : orange, pawC = pat === 'points' || pat === 'twotone' ? B : orange;
+  const tailC = pat === 'points' ? B : orange, headC = pat === 'points' ? B : orange, cheekC = pat === 'twotone' ? B : orange;
+  const stripeC = pat === 'tabby' ? B : pat === 'twotone' ? mx.dark : dark, stripeW = pat === 'tabby' ? 6 : 3;
+  const blob = (clip, x, y, rx, ry, rot) => { // a patch of B, kept inside the part it sits on
+    ctx.save(); ctx.beginPath(); ctx.ellipse(clip[0], clip[1], clip[2], clip[3], 0, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = B; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  };
   const la = now - (st.left || -1e6), ra = now - (st.right || -1e6);
   const tailSwish = Math.sin(now / 260) * 12 + (la < 300 ? -20 : 0) + (ra < 300 ? 20 : 0);
   // head (behind)
-  poly(ctx, [[cx - 38, cy - 92], [cx - 30, cy - 128], [cx - 10, cy - 102]], 301, orange, INK, 0.8, 2.2);
-  poly(ctx, [[cx + 10, cy - 102], [cx + 30, cy - 128], [cx + 38, cy - 92]], 302, orange, INK, 0.8, 2.2);
+  poly(ctx, [[cx - 38, cy - 92], [cx - 30, cy - 128], [cx - 10, cy - 102]], 301, earC, INK, 0.8, 2.2);
+  poly(ctx, [[cx + 10, cy - 102], [cx + 30, cy - 128], [cx + 38, cy - 92]], 302, earC, INK, 0.8, 2.2);
   poly(ctx, [[cx - 33, cy - 98], [cx - 29, cy - 118], [cx - 18, cy - 102]], 303, '#ffb3c6', null);
   poly(ctx, [[cx + 18, cy - 102], [cx + 29, cy - 118], [cx + 33, cy - 98]], 304, '#ffb3c6', null);
-  ellipse(ctx, cx, cy - 86, 42, 34, 305, orange, INK, 1.2, 2.4);
+  ellipse(ctx, cx, cy - 86, 42, 34, 305, headC, INK, 1.2, 2.4); // points: dark face like a Siamese
+  if (pat === 'patches') blob([cx, cy - 86, 41, 33], cx + 16, cy - 98, 15, 11, 0.3);
   // body
   ellipse(ctx, cx, cy - 30, 92, 58, 306, orange, INK, 1.5, 2.6);
+  if (pat === 'patches') { const bd = [cx, cy - 30, 91, 57]; blob(bd, cx - 50, cy - 52, 26, 17, -0.4); blob(bd, cx + 56, cy - 36, 18, 13, 0.5); }
   for (const s of [-1, 1]) {
-    curve(ctx, [[cx + s * 30, cy - 76], [cx + s * 44, cy - 54], [cx + s * 36, cy - 34]], 307 + s, dark, 3);
-    curve(ctx, [[cx + s * 60, cy - 60], [cx + s * 72, cy - 40], [cx + s * 66, cy - 22]], 309 + s, dark, 3);
+    curve(ctx, [[cx + s * 30, cy - 76], [cx + s * 44, cy - 54], [cx + s * 36, cy - 34]], 307 + s, stripeC, stripeW);
+    curve(ctx, [[cx + s * 60, cy - 60], [cx + s * 72, cy - 40], [cx + s * 66, cy - 22]], 309 + s, stripeC, stripeW);
   }
   // paws
-  ellipse(ctx, cx - 62, cy + 54, 22, 10, 311, orange, INK, 0.8, 2);
-  ellipse(ctx, cx + 62, cy + 54, 22, 10, 312, orange, INK, 0.8, 2);
+  ellipse(ctx, cx - 62, cy + 54, 22, 10, 311, pawC, INK, 0.8, 2);
+  ellipse(ctx, cx + 62, cy + 54, 22, 10, 312, pawC, INK, 0.8, 2);
   // cheeks
   const cheek = (side, age, seed, held) => {
     const w = held ? 0.55 : wobble(age);
     const x = cx + side * 50, y = cy + 14;
     const red = held ? 0.9 : age < 900 ? 1 - age / 900 : 0;
     ctx.save(); ctx.translate(x, y); ctx.scale(1 + w * 0.18, 1 - w * 0.14);
-    const col = red > 0 ? mix(orange, '#ff5a5a', red * 0.75) : orange;
+    const col = red > 0 ? mix(cheekC, '#ff5a5a', red * 0.75) : cheekC;
     ellipse(ctx, 0, 0, 56, 50, seed, col, INK, 1.4, 2.6);
-    curve(ctx, [[side * 14, -30], [side * 30, -20], [side * 34, -2]], seed + 1, dark, 3);
+    if (pat === 'patches' && side < 0) blob([0, 0, 55, 49], -14, 12, 20, 15, 0.6);
+    curve(ctx, [[side * 14, -30], [side * 30, -20], [side * 34, -2]], seed + 1, stripeC, stripeW);
     ctx.restore();
     hand(ctx, x + side * 6, y - 2, held ? 0 : red * 1.2, side > 0, seed + 3);
   };
@@ -549,7 +577,7 @@ function drawButtInner(ctx, cx, cy, st, now, o = {}) {
   // tail from the top of the crack
   const tx = cx, ty = cy - 30;
   const tip = [cx + 40 + tailSwish, cy - 128];
-  curve(ctx, [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip], 340, orange, 13);
+  curve(ctx, [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip], 340, tailC, 13);
   curve(ctx, [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip], 341, INK, 1.6);
   // the slapping hand jumps onto the cheek (and stays there while the right one is held)
   const handAt = (side, age, held, upAge) => {

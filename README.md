@@ -47,7 +47,8 @@ For HTTPS, put it behind Caddy, Traefik or nginx and set `TRUST_PROXY=1`.
 
 ## Market
 
-Logged-in players spend salmon on colours: 60 for the cat and 60 for the mouse (`shared/skins.js`, 2–12 salmon each;
+Logged-in players spend salmon on looks for the cat and the mouse (`shared/skins.js`): 60 plain colours (2–12 salmon)
+and 200 two-colour mixes each (stripes, points, two-tone, patches; 6–15 salmon, black/white and white/black included;
 the ginger cat and the grey mouse are free). Each of a map's 3 salmon pays into the wallet once, the first time a
 finished run collects it. Repeat runs of a finished map hide one bonus salmon in place of a plain cheese, picked from
 the run ticket so it moves every run and the server can recompute it; it scores like the cheese it replaces, so

@@ -74,11 +74,49 @@ function shade(hex) {
   return '#' + c.map((v) => Math.round(dark ? v + (255 - v) * 0.3 : v * 0.78).toString(16).padStart(2, '0')).join('');
 }
 
+const lum = (hex) => { const n = parseInt(hex.slice(1), 16); return (n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11; };
+
+// Two-colour mixes: a main fur colour A plus a second colour B laid out by a pattern. A/B and B/A are different
+// skins (black with white patches is not white with black patches).
+export const PATTERNS = {
+  tabby: { cs: 'pruhy', en: 'stripes', price: 6 },
+  points: { cs: 'konečky', en: 'points', price: 8 },
+  twotone: { cs: 'dvoubarva', en: 'two-tone', price: 10 },
+  patches: { cs: 'flíčky', en: 'patches', price: 12 },
+};
+const MIX_BASE = ['white', 'black', 'ginger', 'cream', 'ash', 'chocolate', 'russian-blue', 'caramel', 'graphite', 'sand',
+  'pink', 'lavender', 'sky', 'mint', 'gold', 'neon-pink', 'cherry', 'midnight'];
+const FANCY = new Set(['pink', 'lavender', 'sky', 'mint', 'gold', 'neon-pink', 'cherry', 'midnight']); // +3 salmon
+const MIXES_PER_PATTERN = 50;
+const BY_SLUG = new Map(COLOURS.map((c) => [c[0], c]));
+const PAIRS = [];
+for (const a of MIX_BASE) for (const b of MIX_BASE) {
+  if (a !== b && Math.abs(lum(BY_SLUG.get(a)[1]) - lum(BY_SLUG.get(b)[1])) > 45) PAIRS.push([a, b]); // must read as two colours
+}
+
 export const SKINS = [];
 for (const kind of ['cat', 'mouse']) {
   for (const [slug, hex, cs, en, tier] of COLOURS) {
     const id = `${kind}:${slug}`;
     SKINS.push({ id, kind, hex, dark: shade(hex), name: { cs, en }, price: id === DEFAULT[kind] ? 0 : PRICE[tier] });
   }
+  Object.entries(PATTERNS).forEach(([pat, P], pi) => {
+    // walk the pair list with a stride so every pattern gets a different, varied set of 50
+    // black/white and white/black in every pattern, the rest picked across the pair list
+    const picks = ['white-black', 'black-white'];
+    for (let k = 0; picks.length < MIXES_PER_PATTERN; k++) {
+      const key = PAIRS[(k * 7 + pi * 13) % PAIRS.length].join('-');
+      if (!picks.includes(key)) picks.push(key);
+    }
+    for (const key of picks) {
+      const [a, b] = PAIRS.find((x) => x.join('-') === key);
+      const A = BY_SLUG.get(a), B = BY_SLUG.get(b);
+      SKINS.push({
+        id: `${kind}:mix-${pat}-${a}-${b}`, kind, hex: A[1], dark: shade(A[1]), mix: { pat, hex: B[1], dark: shade(B[1]) },
+        name: { cs: `${A[2]} / ${B[2]} · ${P.cs}`, en: `${A[3]} / ${B[3]} · ${P.en}` },
+        price: P.price + (FANCY.has(a) || FANCY.has(b) ? 3 : 0),
+      });
+    }
+  });
 }
 export const SKIN_BY_ID = new Map(SKINS.map((s) => [s.id, s]));

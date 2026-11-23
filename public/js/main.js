@@ -1,7 +1,7 @@
 // App shell: screens, input, accounts, leaderboards, results.
 import { Game } from './game.js';
 import { W, H, SKIN, drawButt, drawMouse } from './render.js';
-import { SKINS, SKIN_BY_ID } from '../shared/skins.js';
+import { SKINS, SKIN_BY_ID, PATTERNS } from '../shared/skins.js';
 import { bonusItem } from '../shared/sim.js';
 import * as audio from './audio.js';
 import { t as tr, STR } from './i18n.js';
@@ -400,9 +400,14 @@ function renderShop() {
   const worn = sh[shopKind];
   if (!shopSel || SKIN_BY_ID.get(shopSel).kind !== shopKind) shopSel = worn;
   const owns = (s) => s.price === 0 || sh.owned.includes(s.id);
-  $('#shop-grid').innerHTML = SKINS.filter((s) => s.kind === shopKind).map((s) =>
-    `<button class="sw${owns(s) ? ' own' : ''}${s.id === worn ? ' on' : ''}${s.id === shopSel ? ' sel' : ''}" data-skin="${s.id}" title="${esc(s.name[lang])}" aria-label="${esc(s.name[lang])}">` +
-    `<i style="background:${s.hex}"></i>${s.id === worn ? '✔' : owns(s) ? '' : s.price + '🐟'}</button>`).join('');
+  let group = null;
+  $('#shop-grid').innerHTML = SKINS.filter((s) => s.kind === shopKind).map((s) => {
+    const g = s.mix ? s.mix.pat : 'solid', head = g !== group ? `<h3 class="shop-group">${esc(g === 'solid' ? T('shopSolid') : `${T('shopMix')}: ${PATTERNS[g][lang]}`)}</h3>` : '';
+    group = g;
+    const bg = s.mix ? `linear-gradient(135deg, ${s.hex} 50%, ${s.mix.hex} 50%)` : s.hex; // a mix shows both colours
+    return head + `<button class="sw${owns(s) ? ' own' : ''}${s.id === worn ? ' on' : ''}${s.id === shopSel ? ' sel' : ''}" data-skin="${s.id}" title="${esc(s.name[lang])}" aria-label="${esc(s.name[lang])}">` +
+      `<i style="background:${bg}"></i>${s.id === worn ? '✔' : owns(s) ? '' : s.price + '🐟'}</button>`;
+  }).join('');
   const s = SKIN_BY_ID.get(shopSel), btn = $('#shop-act');
   $('#shop-name').textContent = s.name[lang] + (s.price === 0 ? ` (${T('shopFree')})` : '');
   btn.disabled = false;
