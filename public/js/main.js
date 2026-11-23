@@ -48,13 +48,18 @@ const game = new Game(canvas, {
     }
     return -1;
   },
-  onSlow: () => { if (dprCap > 1) { dprCap = Math.max(1, dprCap - 0.5); fit(); } },
+  onSlow: () => {
+    if (dprCap <= 1) return;
+    if (performance.now() - raisedAt < 30000) capLocked = true; // sharper was too much: stay at this level
+    dprCap -= 0.5; fit();
+  },
+  onFast: () => { if (!capLocked && dprCap < 2) { dprCap += 0.5; raisedAt = performance.now(); fit(); } },
 });
 game.setLang(lang);
 window.__slappy = game; // debug handle
 
 // ---------------- layout ----------------
-let dprCap = 2; // lowered step by step when frames run late (shortcut: also hits 30 Hz power-save screens, fine)
+let dprCap = 2, capLocked = false, raisedAt = -1e9; // resolution cap, moved by game.watchFrame
 function fit() {
   const vw = window.innerWidth, vh = window.innerHeight;
   const s = Math.min(vw / W, vh / H);

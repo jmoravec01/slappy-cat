@@ -17,7 +17,7 @@ export class Game {
     this.qHold = false;      // is the right cheek held as far as the input log knows
     this.last = performance.now();
     this.acc = 0;
-    this.perf = { frames: 0, slow: 0 };
+    this.perf = { d: [], bad: 0, good: 0 }; // frame-time watchdog, see watchFrame
     this.lang = 'cs';
     requestAnimationFrame((t) => this.frame(t));
   }
@@ -89,7 +89,24 @@ export class Game {
     this.reset();
     this.mode = 'play';
     this.v.banner = null;
-    this.last = performance.now();
+    this.last = this.playAt = performance.now();
+  }
+
+  // Judges 2 s windows of real play (not menus, not the first seconds while the background tiles get drawn).
+  // Too slow twice in a row -> fewer pixels; smooth for a while -> sharper again. A steady 30 Hz screen
+  // (battery saving) is left alone: fewer pixels would not make it faster, only blurrier.
+  watchFrame(dt) {
+    const pf = this.perf;
+    pf.d.push(dt);
+    if (pf.d.length < 120) return;
+    const d = pf.d.sort((a, b) => a - b), late = d.filter((x) => x > 22).length;
+    pf.d = [];
+    if (d[d.length - 1] > 99) return; // a hiccup (tab switch, GC): no verdict
+    const slow = late > 30 && d[12] < 25;
+    pf.bad = slow ? pf.bad + 1 : 0;
+    pf.good = !slow && late < 6 ? pf.good + 1 : 0;
+    if (pf.bad >= 2) { pf.bad = 0; this.hooks.onSlow && this.hooks.onSlow(); }
+    if (pf.good >= 5) { pf.good = 0; this.hooks.onFast && this.hooks.onFast(); }
   }
 
   pause() {
@@ -315,9 +332,7 @@ export class Game {
       let n = 0;
       while (this.acc >= STEP && n < 8 && (this.mode === 'play' || this.mode === 'demo')) { this.tick(); this.acc -= STEP; n++; }
       if (n >= 8) this.acc = 0;
-      // over 2 s of play, a quarter of frames late = the device can't keep up: ask for fewer pixels
-      const pf = this.perf; pf.frames++; if (dt > 22) pf.slow++;
-      if (pf.frames >= 120) { if (pf.slow > 30 && this.hooks.onSlow) this.hooks.onSlow(); pf.frames = pf.slow = 0; }
+      if (this.mode === 'play' && now - this.playAt > 3000) this.watchFrame(dt);
     }
     if (this.map) {
       const s = this.sim;

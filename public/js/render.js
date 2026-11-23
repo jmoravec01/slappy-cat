@@ -162,34 +162,35 @@ function decorSlot(ctx, th, i, x, t) {
 // The background (paper + decor) is drawn once into narrow tiles, one set per pencil "boil" frame, and then only
 // copied: most of a frame's drawing was background. Animated decor (stars, bubbles, gauges) stays live.
 const TILE = 120, LIVE = new Set(['night', 'bubbles', 'holes']), tiles = new Map();
-function tileFor(th, j, boil, px) {
-  const key = th.decor + th.bg + '|' + j + '|' + boil + '|' + px;
+// sx, sy = device pixels per game unit: a tile holds exactly the pixels it covers on screen (+1 px of overlap),
+// so it is copied 1:1, never rescaled (rescaling is what makes a canvas copy soft)
+function tileFor(th, j, boil, sx, sy) {
+  const key = th.decor + th.bg + '|' + j + '|' + boil + '|' + sx + '|' + sy;
   let c = tiles.get(key);
   if (c) { tiles.delete(key); tiles.set(key, c); return c; } // keep recently used at the end
   c = document.createElement('canvas');
-  c.width = Math.round(TILE * px); c.height = Math.round(VIEW_H * px);
+  c.width = Math.ceil(TILE * sx) + 1; c.height = Math.ceil(VIEW_H * sy) + 1;
   const t = c.getContext('2d', { alpha: false }); // opaque: copying it needs no blending
-  t.scale(c.width / TILE, c.height / VIEW_H);
+  t.scale(sx, sy);
   t.translate(-j * TILE, 0);
-  paper(t, th, j * TILE, TILE);
-  t.beginPath(); t.rect(j * TILE, 0, TILE, VIEW_H); t.clip();
+  paper(t, th, j * TILE, TILE + 2 / sx);
+  t.beginPath(); t.rect(j * TILE, 0, TILE + 2 / sx, VIEW_H + 2 / sy); t.clip();
   const saved = S.boil; S.boil = boil;
   for (let i = Math.floor((j * TILE - SP - 100) / SP); i * SP < (j + 1) * TILE + 100; i++) decorSlot(t, th, i, i * SP, 0);
   S.boil = saved;
   tiles.set(key, c);
-  if (tiles.size > 40) tiles.delete(tiles.keys().next().value);
+  if (tiles.size > 32) tiles.delete(tiles.keys().next().value);
   return c;
 }
 
 function background(ctx, th, camX, t) {
-  if (LIVE.has(th.decor)) { paper(ctx, th); decor(ctx, th, camX, t); return; }
-  const m = ctx.getTransform(), par = camX * 0.3;
-  const px = Math.min(2, Math.round(m.a * 4) / 4); // tile resolution follows the canvas, capped to save memory
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // draw in device pixels so neighbouring tiles meet without seams
-  const top = Math.round(m.f), bottom = Math.round(m.f + VIEW_H * m.d);
+  const m = ctx.getTransform();
+  if (LIVE.has(th.decor) || m.a > 3) { paper(ctx, th); decor(ctx, th, camX, t); return; } // huge canvas: too much memory
+  const par = camX * 0.3;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // draw in device pixels, each tile at a whole pixel
+  const top = Math.round(m.f);
   for (let j = Math.floor(par / TILE); j * TILE - par < W; j++) {
-    const x0 = Math.round(m.e + (j * TILE - par) * m.a), x1 = Math.round(m.e + ((j + 1) * TILE - par) * m.a);
-    ctx.drawImage(tileFor(th, j, S.boil, px), x0, top, x1 - x0, bottom - top);
+    ctx.drawImage(tileFor(th, j, S.boil, m.a, m.d), Math.round(m.e + (j * TILE - par) * m.a), top);
   }
   ctx.setTransform(m);
 }
