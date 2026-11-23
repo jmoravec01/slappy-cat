@@ -599,7 +599,10 @@ export const server = http.createServer(async (req, res) => {
       if (origin && CORS_ORIGINS.has(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin');
         if (req.method === 'OPTIONS') {
-          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '600' });
+          // Allow-Private-Network: Chrome asks for it when the API host resolves to a private address, e.g. a
+          // Tailscale name seen from inside the tailnet
+          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '600',
+            ...(req.headers['access-control-request-private-network'] ? { 'Access-Control-Allow-Private-Network': 'true' } : {}) });
           return res.end();
         }
       }

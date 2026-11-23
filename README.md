@@ -1,5 +1,10 @@
 # Slappy Cat 🐱👋🐭
 
+**▶ Play it here: https://jmoravec01.github.io/slappy-cat/** (free, in the browser, desktop and phone; leaderboards,
+accounts and the market need no install)
+
+[![Slappy Cat: the mouse runs through the market hall while you slap the cat's butt](docs/screenshot.png)](https://jmoravec01.github.io/slappy-cat/)
+
 A one-button side-scrolling runner for the browser: you slap a cat's butt,
 the cat meows, and a scared mouse jumps or ducks its way through the level, straight
 into a mousetrap. Then the cat you have been slapping leaps out of the panel and eats it.
@@ -64,6 +69,9 @@ somewhere reachable over HTTPS.
 2. In the GitHub repo: *Settings → Pages → Source: GitHub Actions*, and *Settings → Variables → Actions*:
    `SLAPPY_API=https://your-server.example/` (with the trailing slash).
 3. Push to `main`; `.github/workflows/pages.yml` builds the site with `tools/build-pages.sh` and publishes it.
+
+A free way to give a home server HTTPS is Tailscale Funnel (`tailscale funnel --bg 8077`); behind it set
+`TRUST_PROXY=1` so rate limits see the players' addresses.
 
 Without `SLAPPY_API` the Pages copy plays offline: everything works, progress stays in the browser, no leaderboards.
 
