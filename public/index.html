@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#fdf3e1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Slappy Cat</title>
+<meta name="slappy-api" content="">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preload" href="fonts/PatrickHand.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="960" height="540" aria-label="Slappy Cat"></canvas>
+  <div id="ui">
+    <button id="btn-pause" class="icon-btn hidden" aria-label="Pause"><i></i><i></i></button>
+
+    <section id="scr-menu" class="screen card menu-card">
+      <h1 class="logo"><span>S</span><span>L</span><span>A</span><span>P</span><span>P</span><span>Y</span> <span>C</span><span>A</span><span>T</span></h1>
+      <p class="tagline" data-t="tagline"></p>
+      <div class="menu-buttons">
+        <button class="btn big primary" data-act="maps" data-t="play"></button>
+        <button class="btn" data-act="board" data-t="board"></button>
+        <button class="btn" data-act="auth" id="btn-account"></button>
+        <button class="btn" data-act="help" data-t="help"></button>
+        <button class="btn" data-act="shop" id="btn-shop" data-t="shop"></button>
+      </div>
+      <p class="who" id="who"></p>
+      <div class="menu-foot">
+        <button class="link" data-act="sound" id="btn-sound"></button>
+        <button class="link" data-act="music" id="btn-music"></button>
+        <button class="link" data-act="lang" id="btn-lang"></button>
+        <button class="link" data-act="ghost" id="btn-ghost"></button>
+      </div>
+    </section>
+
+    <section id="scr-maps" class="screen card wide hidden">
+      <header class="bar"><button class="btn small" data-act="menu" data-t="back"></button><h2 data-t="chooseMap"></h2><span class="sum" id="maps-sum"></span></header>
+      <div id="map-grid" class="map-grid"></div>
+      <p class="note" id="maps-note"></p>
+    </section>
+
+    <section id="scr-shop" class="screen card wide tall hidden">
+      <header class="bar"><button class="btn small" data-act="menu" data-t="back"></button><h2 data-t="shop"></h2><span class="sum" id="shop-sum"></span></header>
+      <div class="tabs" id="shop-tabs"><button class="tab" data-kind="cat" data-t="shopCat"></button><button class="tab" data-kind="mouse" data-t="shopMouse"></button></div>
+      <div class="shop">
+        <div class="shop-side">
+          <canvas id="shop-preview" width="520" height="440"></canvas>
+          <p class="shop-name" id="shop-name"></p>
+          <button class="btn primary" id="shop-act"></button>
+          <p class="err" id="shop-err" role="alert"></p>
+          <p class="note" data-t="shopHow"></p>
+        </div>
+        <div class="shop-grid" id="shop-grid"></div>
+      </div>
+    </section>
+
+    <section id="scr-board" class="screen card wide tall hidden">
+      <header class="bar"><button class="btn small" data-act="back" data-t="back"></button><h2 data-t="board"></h2><span class="sum" id="board-sum"></span></header>
+      <div class="tabs" id="board-tabs"></div>
+      <div class="board-wrap"><table class="board"><tbody id="board-rows"></tbody></table></div>
+      <p class="note" id="board-me"></p>
+    </section>
+
+    <section id="scr-auth" class="screen card hidden">
+      <header class="bar"><button class="btn small" data-act="menu" data-t="back"></button><h2 data-t="account"></h2></header>
+      <div id="auth-out">
+        <div class="tabs"><button class="tab active" data-tab="login" data-t="login"></button><button class="tab" data-tab="register" data-t="register"></button></div>
+        <form id="auth-form" autocomplete="on" novalidate>
+          <label><span data-t="nick"></span><input name="name" id="f-name" autocomplete="username" maxlength="16" required autocapitalize="off" spellcheck="false"><span class="hint" id="h-name"></span></label>
+          <label><span data-t="password"></span><input name="password" id="f-pass" type="password" autocomplete="current-password" maxlength="200" required><span class="hint" id="h-pass"></span></label>
+          <label id="row-pass2" class="hidden"><span data-t="password2"></span><input name="password2" id="f-pass2" type="password" autocomplete="new-password" maxlength="200"><span class="hint" id="h-pass2"></span></label>
+          <p class="err" id="auth-err" role="alert"></p>
+          <button class="btn primary" type="submit" id="auth-submit" data-t="submit"></button>
+        </form>
+        <p class="note" data-t="authInfo"></p>
+      </div>
+      <div id="auth-in" class="hidden">
+        <p class="hello" id="auth-hello"></p>
+        <p class="note" id="auth-stats"></p>
+        <button class="btn" data-act="logout" data-t="logout"></button>
+      </div>
+    </section>
+
+    <section id="scr-help" class="screen card hidden">
+      <header class="bar"><button class="btn small" data-act="menu" data-t="back"></button><h2 data-t="helpTitle"></h2></header>
+      <ul class="help" id="help-list"></ul>
+    </section>
+
+    <section id="scr-results" class="screen card hidden">
+      <h2 class="result-title" data-t="finished"></h2>
+      <div id="result-body"></div>
+      <div class="row">
+        <button class="btn" data-act="retry" data-t="retry"></button>
+        <button class="btn" data-act="maps" data-t="maps"></button>
+        <button class="btn" data-act="mapboard" data-t="board"></button>
+        <button class="btn primary" data-act="next" id="btn-next" data-t="next"></button>
+      </div>
+    </section>
+
+    <section id="scr-over" class="screen card small-card over-card hidden">
+      <h2 class="over-title" data-t="gameOver"></h2>
+      <p class="over-cause" id="over-cause"></p>
+      <div id="over-body"></div>
+      <div class="col">
+        <button class="btn primary big" data-act="retry" data-t="retry"></button>
+        <button class="btn" data-act="maps" data-t="maps"></button>
+      </div>
+      <p class="note" data-t="retryHint"></p>
+    </section>
+
+    <section id="scr-pause" class="screen card small-card hidden">
+      <h2 data-t="pause"></h2>
+      <div class="col">
+        <button class="btn primary" data-act="resume" data-t="resume"></button>
+        <button class="btn" data-act="retry" data-t="restart"></button>
+        <button class="btn" data-act="maps" data-t="quit"></button>
+      </div>
+    </section>
+  </div>
+</div>
+<div id="rotate" data-t="rotate"></div>
+<noscript>Slappy Cat needs JavaScript.</noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

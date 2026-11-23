@@ -1,0 +1,26 @@
+services:
+  slappy-cat:
+    build: .
+    image: slappy-cat:latest
+    container_name: slappy-cat
+    restart: unless-stopped
+    ports:
+      - "${SLAPPY_PORT:-8077}:8080"
+    environment:
+      # set to 1 when running behind a reverse proxy (Caddy/Traefik/nginx) so
+      # rate limits use X-Forwarded-For instead of the proxy's IP
+      TRUST_PROXY: "${TRUST_PROXY:-0}"
+    volumes:
+      - slappy-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m   # scrypt logins need ~16 MB each
+    cpus: 0.5
+
+volumes:
+  slappy-data:

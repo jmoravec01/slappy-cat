@@ -1,0 +1,27 @@
+# dependencies (the project has none, but tools may install some)
+node_modules/
+
+# runtime data: SQLite database, backups, logs, secrets
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.log
+.env
+.env.*
+
+# local tooling output
+graphify-out/
+.xb-*.png
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# static build (tools/build-pages.sh)
+_site/

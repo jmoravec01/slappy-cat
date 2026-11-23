@@ -1,0 +1,35 @@
+# Publishes the game as a static site on GitHub Pages.
+# Leaderboards need the game server somewhere public: set the repository variable SLAPPY_API to its URL
+# (https://..., ending with /) and start that server with CORS_ORIGINS=https://<user>.github.io.
+# Without SLAPPY_API the Pages copy plays offline (progress stays in the browser).
+name: Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: tools/build-pages.sh "${SLAPPY_API:-none}" _site
+        env:
+          SLAPPY_API: ${{ vars.SLAPPY_API }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
