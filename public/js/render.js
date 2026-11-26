@@ -1,10 +1,20 @@
 // Scene rendering: themes, world, mouse, cat, trap, HUD with the slappable butt.
+// Everything is drawn as pixel art into a 480 x 270 frame (pixel.js) in game units, then scaled up.
 import { C } from '../shared/sim.js';
-import { S, setBoil, hash, line, poly, rect, ellipse, hatch, curve, text, star } from './sketch.js';
+import {
+  INK, PW, PH, K, hash, line, poly, rect, ellipse, hatch, curve, text, star, textWidth, textScale,
+  box, disc, oval, stripes, save, restore, translate, rotate, scale, alpha, clipEllipse, target, main, present, frame,
+} from './pixel.js';
+import { createFx, composite, createFrame } from '../vendor/pixelfx/core/fx.js';
+import * as POW from '../vendor/pixelfx/fx/explosions/cartoon-pow.js';
+import * as BURST from '../vendor/pixelfx/fx/pickups/collect-burst.js';
+import * as POOF from '../vendor/pixelfx/fx/spawn/poof.js';
+import * as CRIT from '../vendor/pixelfx/fx/impacts/crit-hit.js';
+import * as CONFETTI from '../vendor/pixelfx/fx/ui/confetti.js';
+import * as THUD from '../vendor/pixelfx/fx/impacts/blunt-hit.js';
 
 export const W = 960, H = 540, VIEW_H = 360;
 const G = C.GROUND_Y;
-const INK = '#2b2b2b';
 export const MOUSE_SCREEN_X = 330;
 export const TRAP_OFFSET = 170;
 // colours bought in the market: { hex, dark } or null for the default ginger cat / grey mouse
@@ -35,254 +45,251 @@ export const THEMES = {
 THEMES.sewer.water = '#86a86f';
 const PASTEL = ['#f7a1b5', '#9fd3f7', '#ffe08a', '#b6e3a1', '#d6c4f3', '#ffc59e'];
 
+function mix(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const r = Math.round(((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t);
+  const g = Math.round(((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t);
+  const bl = Math.round((pa & 255) * (1 - t) + (pb & 255) * t);
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+const shade = (c, t = 0.22) => mix(c, '#1d1a2b', t); // darker step of a colour
+const light = (c, t = 0.35) => mix(c, '#ffffff', t); // lighter step
+
+// ---------------- pixelfx effects (one-shots in the same frame) ----------------
+const FX = { pow: POW, burst: BURST, poof: POOF, crit: CRIT, confetti: CONFETTI, thud: THUD };
+const live = [];
+// x, y in game units; screen = true for effects that don't scroll with the world
+export function spawnFx(kind, x, y, opts = {}, screen = false) {
+  if (live.length > 12) live.shift();
+  live.push({ fx: createFx(FX[kind], { ...opts, x: 0, y: 0 }), x, y, screen });
+}
+export function clearFx() { live.length = 0; }
+
 // ---------------- background ----------------
-function paper(ctx, th, x = 0, w = W) {
-  ctx.fillStyle = th.bg; ctx.fillRect(x, 0, w, VIEW_H);
-  ctx.strokeStyle = th.night ? 'rgba(255,255,255,0.06)' : 'rgba(70,110,200,0.10)';
-  ctx.lineWidth = 1; ctx.beginPath();
-  for (let y = 24; y < VIEW_H; y += 24) { ctx.moveTo(x, y); ctx.lineTo(x + w, y); }
-  ctx.stroke();
+function paper(th, camX) {
+  box(0, 0, W, VIEW_H, th.bg);
+  // wallpaper: a fine pixel line every 24 units and a faint dot grid that scrolls slowly
+  const ln = th.night ? light(th.bg, 0.08) : shade(th.bg, 0.05), dot = th.night ? light(th.bg, 0.14) : shade(th.bg, 0.09);
+  for (let y = 24; y < VIEW_H; y += 24) box(0, y, W, 2, ln);
+  const off = (camX * 0.3) % 48;
+  for (let x = -off; x < W; x += 48) for (let y = 12; y < VIEW_H; y += 48) box(x, y, 2, 2, dot);
 }
 
 const SP = 260; // width of one decor slot
-function decor(ctx, th, camX, t) {
+function decor(th, camX, t) {
   const par = camX * 0.3;
   const i0 = Math.floor(par / SP) - 1;
-  for (let i = i0; i < i0 + W / SP + 3; i++) decorSlot(ctx, th, i, i * SP - par, t);
+  for (let i = i0; i < i0 + W / SP + 3; i++) decorSlot(th, i, i * SP - par, t);
 }
 
-function decorSlot(ctx, th, i, x, t) {
+const DK = 'rgba(29,26,43,0.35)'; // decor outline: soft so the decor stays behind the action
+function decorSlot(th, i, x, t) {
   const sp = SP, r = hash(i * 17 + 3), r2 = hash(i * 31 + 7);
-  {
-    switch (th.decor) {
-      case 'tiles':
-        rect(ctx, x + 20, 70 + r * 60, 70, 70, i, th.far, 'rgba(43,43,43,0.35)', 1.5, 1.4);
-        line(ctx, x + 55, 70 + r * 60, x + 55, 140 + r * 60, i + 1, 1, 'rgba(43,43,43,0.3)', 1.2);
-        line(ctx, x + 20, 105 + r * 60, x + 90, 105 + r * 60, i + 2, 1, 'rgba(43,43,43,0.3)', 1.2);
-        break;
-      case 'frames':
-        rect(ctx, x + 30, 60 + r * 50, 80 + r2 * 40, 60, i, th.far, 'rgba(43,43,43,0.5)', 1.5, 1.6);
-        curve(ctx, [[x + 40, 110 + r * 50], [x + 70, 80 + r * 50], [x + 100, 105 + r * 50]], i, 'rgba(43,43,43,0.35)', 1.4);
-        break;
-      case 'hills':
-        ellipse(ctx, x + 130, G + 10, 190, 90 + r * 50, i, th.far, 'rgba(43,43,43,0.3)', 3, 1.4);
-        ellipse(ctx, x + 60 + r2 * 100, 60 + r * 40, 40, 16, i + 5, '#ffffff', 'rgba(43,43,43,0.25)', 2, 1.2);
-        break;
-      case 'bricks':
-        for (let k = 0; k < 3; k++) rect(ctx, x + 20 + k * 70 + (k % 2) * 20, 60 + r * 120 + k * 22, 60, 22, i * 5 + k, th.far, 'rgba(43,43,43,0.25)', 1.5, 1.2);
-        break;
-      case 'night': {
-        for (let k = 0; k < 3; k++) {
-          const sx = x + hash(i * 9 + k) * sp, sy = 20 + hash(i * 13 + k) * 140;
-          star(ctx, sx, sy, 3 + hash(i + k) * 3 + ((t / 300 + k + i) % 3 < 0.4 ? 2 : 0), i * 7 + k, '#fff6c2');
-        }
-        rect(ctx, x + 20, G - 90 - r * 90, 120, 200, i, th.far, 'rgba(0,0,0,0.25)', 1.5, 1.4);
-        for (let k = 0; k < 4; k++) if (hash(i * 3 + k) > 0.4) rect(ctx, x + 35 + (k % 2) * 55, G - 70 - r * 90 + Math.floor(k / 2) * 40, 25, 22, i * 4 + k, 'rgba(255,224,138,0.45)', null);
-        break;
+  switch (th.decor) {
+    case 'tiles': {
+      const y = 70 + r * 60;
+      rect(0, x + 20, y, 70, 70, 0, th.far, DK);
+      box(x + 54, y, 2, 70, shade(th.far, 0.15)); box(x + 20, y + 34, 70, 2, shade(th.far, 0.15));
+      box(x + 24, y + 4, 26, 4, light(th.far, 0.4));
+      break;
+    }
+    case 'frames':
+      rect(0, x + 30, 60 + r * 50, 80 + r2 * 40, 60, 0, th.far, DK);
+      curve(0, [[x + 40, 110 + r * 50], [x + 70, 80 + r * 50], [x + 100, 105 + r * 50]], i, shade(th.far, 0.3), 3);
+      break;
+    case 'hills':
+      ellipse(0, x + 130, G + 10, 190, 90 + r * 50, i, th.far, DK);
+      ellipse(0, x + 60 + r2 * 100, 60 + r * 40, 40, 16, i + 5, '#ffffff', 'rgba(29,26,43,0.2)');
+      break;
+    case 'bricks':
+      for (let k = 0; k < 3; k++) rect(0, x + 20 + k * 70 + (k % 2) * 20, 60 + r * 120 + k * 22, 60, 22, 0, th.far, DK);
+      break;
+    case 'night': {
+      for (let k = 0; k < 3; k++) {
+        const sx = x + hash(i * 9 + k) * sp, sy = 20 + hash(i * 13 + k) * 140;
+        star(0, sx, sy, 3 + hash(i + k) * 3 + ((t / 300 + k + i) % 3 < 0.4 ? 2 : 0), 0, '#fff6c2');
       }
-      case 'bubbles':
-        ellipse(ctx, x + r * sp, 60 + ((r2 * 200 - t * 0.02 + i * 40) % 250 + 250) % 250, 10 + r * 14, 10 + r * 14, i, 'rgba(255,255,255,0.6)', 'rgba(70,140,160,0.5)', 1, 1.4);
-        break;
-      case 'rafters':
-        line(ctx, x, 0, x + 120, 120, i, 2, th.far, 10);
-        line(ctx, x + 240, 0, x + 120, 120, i + 1, 2, th.far, 10);
-        break;
-      case 'city':
-        rect(ctx, x + 10, G - 120 - r * 120, 100 + r2 * 60, 260, i, th.far, 'rgba(43,43,43,0.25)', 1.5, 1.4);
-        for (let k = 0; k < 6; k++) rect(ctx, x + 25 + (k % 3) * 28, G - 100 - r * 120 + Math.floor(k / 3) * 36, 16, 20, i * 6 + k, hash(i * 6 + k) > 0.5 ? '#fff1b8' : 'rgba(255,255,255,0.4)', null);
-        break;
-      case 'holes': { // pipes and gauges of the cheese factory, kept pale so they don't look like pickups
-        const gx = x + r * 120, gy = 50 + r2 * 120;
-        line(ctx, x, gy + 40, x + sp, gy + 40, i, 1.5, th.far, 8);
-        ellipse(ctx, gx + 40, gy + 40, 22, 22, i + 1, '#fffdf2', 'rgba(154,116,20,0.5)', 1, 1.6);
-        line(ctx, gx + 40, gy + 40, gx + 40 + 12 * Math.cos(t / 700 + i), gy + 40 - 12 * Math.abs(Math.sin(t / 700 + i)), i + 2, 0.3, '#c0392b', 1.6);
-        break;
+      rect(0, x + 20, G - 90 - r * 90, 120, 200, 0, th.far, 'rgba(0,0,0,0.3)');
+      for (let k = 0; k < 4; k++) if (hash(i * 3 + k) > 0.4) box(x + 35 + (k % 2) * 55, G - 70 - r * 90 + Math.floor(k / 2) * 40, 24, 22, '#ffe08a');
+      break;
+    }
+    case 'bubbles': {
+      const by = 60 + ((r2 * 200 - t * 0.02 + i * 40) % 250 + 250) % 250, br = 10 + r * 14;
+      ellipse(0, x + r * sp, by, br, br, 0, 'rgba(255,255,255,0.6)', 'rgba(70,140,160,0.6)');
+      box(x + r * sp - br * 0.4, by - br * 0.5, 4, 4, '#ffffff');
+      break;
+    }
+    case 'rafters':
+      line(0, x, 0, x + 120, 120, 0, 0, th.far, 12);
+      line(0, x + 240, 0, x + 120, 120, 0, 0, th.far, 12);
+      break;
+    case 'city':
+      rect(0, x + 10, G - 120 - r * 120, 100 + r2 * 60, 260, 0, th.far, DK);
+      for (let k = 0; k < 6; k++) box(x + 25 + (k % 3) * 28, G - 100 - r * 120 + Math.floor(k / 3) * 36, 16, 20, hash(i * 6 + k) > 0.5 ? '#fff1b8' : light(th.far, 0.5));
+      break;
+    case 'holes': { // pipes and gauges of the cheese factory, kept pale so they don't look like pickups
+      const gx = x + r * 120, gy = 50 + r2 * 120;
+      box(x, gy + 36, sp, 8, th.far);
+      ellipse(0, gx + 40, gy + 40, 22, 22, 0, '#fffdf2', 'rgba(154,116,20,0.6)');
+      line(0, gx + 40, gy + 40, gx + 40 + 12 * Math.cos(t / 700 + i), gy + 40 - 12 * Math.abs(Math.sin(t / 700 + i)), 0, 0, '#c0392b', 2);
+      break;
+    }
+    case 'barn': // plank wall and a little window
+      for (let k = 0; k < 4; k++) box(x + k * 65, 0, 2, G, 'rgba(120,70,30,0.25)');
+      if (r > 0.4) { rect(0, x + 90, 50 + r2 * 40, 70, 56, 0, '#d4ecff', DK); box(x + 124, 50 + r2 * 40, 2, 56, 'rgba(29,26,43,0.4)'); }
+      break;
+    case 'doors': // tower-block corridor: oil-painted lower wall, flat doors
+      box(x, 150, sp, G - 150, mix(th.bg, th.far, 0.45));
+      rect(0, x + 70, G - 150, 74, 150, 0, '#d9c3a0', DK);
+      disc(x + 132, G - 75, 3, INK);
+      text(0, String(1 + ((i % 40) + 40) % 40), x + 107, G - 128, 16, 'rgba(29,26,43,0.6)');
+      break;
+    case 'laundry': // washing line with clothes
+      curve(0, [[x, 60], [x + 130, 82], [x + sp, 60]], i, 'rgba(29,26,43,0.4)', 2);
+      for (let k = 0; k < 3; k++) {
+        const cx = x + 40 + k * 75, cy = 64 + Math.sin((k + 0.5) / 3 * Math.PI) * 18;
+        const w = 30 + hash(i * 3 + k) * 12, h = 34 + hash(i * 5 + k) * 18; // a T-shirt on pegs
+        poly(0, [[cx, cy], [cx + w * 0.32, cy], [cx + w / 2, cy + 6], [cx + w * 0.68, cy], [cx + w, cy], [cx + w + 7, cy + h * 0.3], [cx + w * 0.82, cy + h * 0.36], [cx + w * 0.82, cy + h], [cx + w * 0.18, cy + h], [cx + w * 0.18, cy + h * 0.36], [cx - 7, cy + h * 0.3]], 0, PASTEL[(i * 3 + k + 60) % 6], DK);
       }
-      case 'barn': // plank wall and a little window
-        for (let k = 0; k < 4; k++) line(ctx, x + k * 65, 0, x + k * 65, G, i * 4 + k, 1, 'rgba(120,70,30,0.25)', 1.4);
-        if (r > 0.4) { rect(ctx, x + 90, 50 + r2 * 40, 70, 56, i, '#d4ecff', 'rgba(43,43,43,0.4)', 1.5, 1.6); line(ctx, x + 125, 50 + r2 * 40, x + 125, 106 + r2 * 40, i + 1, 1, 'rgba(43,43,43,0.35)', 1.4); }
-        break;
-      case 'doors': // tower-block corridor: oil-painted lower wall, flat doors
-        ctx.fillStyle = th.far; ctx.globalAlpha = 0.45; ctx.fillRect(x, 150, sp, G - 150); ctx.globalAlpha = 1;
-        rect(ctx, x + 70, G - 150, 74, 150, i, '#d9c3a0', 'rgba(43,43,43,0.4)', 1.5, 1.6);
-        ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x + 132, G - 75, 3, 0, Math.PI * 2); ctx.fill();
-        text(ctx, String(1 + ((i % 40) + 40) % 40), x + 107, G - 128, 16, 'rgba(43,43,43,0.6)');
-        break;
-      case 'laundry': // washing line with clothes
-        curve(ctx, [[x, 60], [x + 130, 82], [x + sp, 60]], i, 'rgba(43,43,43,0.4)', 1.4);
-        for (let k = 0; k < 3; k++) {
-          const cx = x + 40 + k * 75, cy = 64 + Math.sin((k + 0.5) / 3 * Math.PI) * 18;
-          const w = 30 + hash(i * 3 + k) * 12, h = 34 + hash(i * 5 + k) * 18; // a T-shirt on pegs
-          poly(ctx, [[cx, cy], [cx + w * 0.32, cy], [cx + w / 2, cy + 6], [cx + w * 0.68, cy], [cx + w, cy], [cx + w + 7, cy + h * 0.3], [cx + w * 0.82, cy + h * 0.36], [cx + w * 0.82, cy + h], [cx + w * 0.18, cy + h], [cx + w * 0.18, cy + h * 0.36], [cx - 7, cy + h * 0.3]], i * 3 + k, PASTEL[(i * 3 + k + 60) % 6], 'rgba(43,43,43,0.3)', 1.2, 1.2);
-        }
-        break;
-      case 'market': { // striped awning over a fruit stand
-        const ay = 70 + r * 40;
-        for (let k = 0; k < 6; k++) { ctx.fillStyle = k % 2 ? th.far : '#fffaf0'; ctx.fillRect(x + 30 + k * 30, ay, 30, 30); }
-        rect(ctx, x + 30, ay, 180, 30, i, null, 'rgba(43,43,43,0.35)', 1.5, 1.4);
-        for (let k = 0; k < 5; k++) ellipse(ctx, x + 55 + k * 32, ay + 70, 12, 11, i * 5 + k, PASTEL[(i + k + 60) % 6], 'rgba(43,43,43,0.3)', 1, 1.2);
-        break;
+      break;
+    case 'market': { // striped awning over a fruit stand
+      const ay = 70 + r * 40;
+      for (let k = 0; k < 6; k++) box(x + 30 + k * 30, ay, 30, 30, k % 2 ? th.far : '#fffaf0');
+      rect(0, x + 30, ay, 180, 30, 0, null, DK);
+      for (let k = 0; k < 5; k++) ellipse(0, x + 55 + k * 32, ay + 70, 12, 11, 0, PASTEL[(i + k + 60) % 6], DK);
+      break;
+    }
+    case 'metro': // tiled band with the line sign
+      box(x, 70, sp, 80, mix(th.bg, th.far, 0.6));
+      if (r > 0.45) { rect(0, x + 100, 88, 44, 44, 0, '#e53935', INK); text(0, 'M', x + 122, 111, 30, '#fff'); }
+      break;
+    case 'columns': // marble columns and the odd chandelier
+      rect(0, x + 40, 20, 44, G - 20, 0, th.far, DK);
+      for (let k = 1; k < 4; k++) box(x + 40 + k * 11, 30, 2, G - 40, 'rgba(29,26,43,0.12)');
+      if (r > 0.5) {
+        box(x + 169, 0, 2, 40, 'rgba(29,26,43,0.4)');
+        curve(0, [[x + 135, 46], [x + 170, 64], [x + 205, 46]], 0, '#c9a85c', 4);
+        for (let k = 0; k < 3; k++) ellipse(0, x + 140 + k * 30, 40, 4, 7, 0, '#fff6c2', DK);
       }
-      case 'metro': // tiled band with the line sign
-        ctx.fillStyle = th.far; ctx.globalAlpha = 0.6; ctx.fillRect(x, 70, sp, 80); ctx.globalAlpha = 1;
-        if (r > 0.45) { rect(ctx, x + 100, 88, 44, 44, i, '#e53935', INK, 1, 1.6); text(ctx, 'M', x + 122, 111, 30, '#fff'); }
-        break;
-      case 'columns': // marble columns and the odd chandelier
-        rect(ctx, x + 40, 20, 44, G - 20, i, th.far, 'rgba(43,43,43,0.25)', 1.5, 1.4);
-        for (let k = 1; k < 4; k++) line(ctx, x + 40 + k * 11, 30, x + 40 + k * 11, G - 10, i * 4 + k, 0.8, 'rgba(43,43,43,0.15)', 1.2);
-        if (r > 0.5) {
-          line(ctx, x + 170, 0, x + 170, 40, i, 0.5, 'rgba(43,43,43,0.4)', 1.4);
-          curve(ctx, [[x + 135, 46], [x + 170, 64], [x + 205, 46]], i + 1, '#c9a85c', 3);
-          for (let k = 0; k < 3; k++) ellipse(ctx, x + 140 + k * 30, 40, 4, 7, i + k, '#fff6c2', 'rgba(43,43,43,0.3)', 0.5, 1);
-        }
-        break;
-      case 'books': { // bookshelf rows
-        ctx.globalAlpha = 0.55;
-        for (let row = 0; row < 3; row++) {
-          const by = 70 + row * 62;
-          for (let bx = 8; bx < sp - 16; bx += 13) { ctx.fillStyle = PASTEL[(bx + row + i * 7 + 600) % 6]; ctx.fillRect(x + bx, by - 30 - hash(i * 31 + bx + row) * 14, 11, 44 + hash(i * 31 + bx + row) * 14 - 14); }
-          ctx.fillStyle = th.far; ctx.fillRect(x, by + 14, sp, 6);
-        }
-        ctx.globalAlpha = 1;
-        break;
+      break;
+    case 'books': { // bookshelf rows
+      save(); alpha(0.7);
+      for (let row = 0; row < 3; row++) {
+        const by = 70 + row * 62;
+        for (let bx = 8; bx < sp - 16; bx += 14) box(x + bx, by - 30 - hash(i * 31 + bx + row) * 14, 12, 44 + hash(i * 31 + bx + row) * 14 - 14, PASTEL[(bx + row + i * 7 + 600) % 6]);
+        box(x, by + 14, sp, 6, th.far);
       }
-      case 'pool': // big window with a palm
-        rect(ctx, x + 40, 40, 150, 110, i, '#d6f3ff', 'rgba(43,43,43,0.3)', 1.5, 1.4);
-        if (r > 0.4) { curve(ctx, [[x + 115, 150], [x + 112, 110], [x + 120, 75]], i, '#9b6b3f', 4); for (const s of [-1, 1]) curve(ctx, [[x + 120, 75], [x + 120 + s * 22, 66], [x + 120 + s * 38, 80]], i + s + 3, '#4caf50', 3); }
-        break;
-      case 'crowns': {
-        const cx = x + r * 200, cy = 60 + r2 * 120;
-        poly(ctx, [[cx - 22, cy + 12], [cx - 22, cy - 10], [cx - 11, cy], [cx, cy - 16], [cx + 11, cy], [cx + 22, cy - 10], [cx + 22, cy + 12]], i, th.far, 'rgba(43,43,43,0.35)', 1, 1.4);
-        break;
-      }
+      restore();
+      break;
+    }
+    case 'pool': // big window with a palm
+      rect(0, x + 40, 40, 150, 110, 0, '#d6f3ff', DK);
+      if (r > 0.4) { curve(0, [[x + 115, 150], [x + 112, 110], [x + 120, 75]], 0, '#9b6b3f', 5); for (const s of [-1, 1]) curve(0, [[x + 120, 75], [x + 120 + s * 22, 66], [x + 120 + s * 38, 80]], 0, '#4caf50', 4); }
+      break;
+    case 'crowns': {
+      const cx = x + r * 200, cy = 60 + r2 * 120;
+      poly(0, [[cx - 22, cy + 12], [cx - 22, cy - 10], [cx - 11, cy], [cx, cy - 16], [cx + 11, cy], [cx + 22, cy - 10], [cx + 22, cy + 12]], 0, th.far, DK);
+      break;
     }
   }
 }
 
-// The background (paper + decor) is drawn once into narrow tiles, one set per pencil "boil" frame, and then only
-// copied: most of a frame's drawing was background. Animated decor (stars, bubbles, gauges) stays live.
-const TILE = 120, LIVE = new Set(['night', 'bubbles', 'holes']), tiles = new Map();
-// sx, sy = device pixels per game unit: a tile holds exactly the pixels it covers on screen (+1 px of overlap),
-// so it is copied 1:1, never rescaled (rescaling is what makes a canvas copy soft)
-function tileFor(th, j, boil, sx, sy) {
-  const key = th.decor + th.bg + '|' + j + '|' + boil + '|' + sx + '|' + sy;
-  let c = tiles.get(key);
-  if (c) { tiles.delete(key); tiles.set(key, c); return c; } // keep recently used at the end
-  c = document.createElement('canvas');
-  c.width = Math.ceil(TILE * sx) + 1; c.height = Math.ceil(VIEW_H * sy) + 1;
-  const t = c.getContext('2d', { alpha: false }); // opaque: copying it needs no blending
-  t.scale(sx, sy);
-  t.translate(-j * TILE, 0);
-  paper(t, th, j * TILE, TILE + 2 / sx);
-  t.beginPath(); t.rect(j * TILE, 0, TILE + 2 / sx, VIEW_H + 2 / sy); t.clip();
-  const saved = S.boil; S.boil = boil;
-  for (let i = Math.floor((j * TILE - SP - 100) / SP); i * SP < (j + 1) * TILE + 100; i++) decorSlot(t, th, i, i * SP, 0);
-  S.boil = saved;
-  tiles.set(key, c);
-  if (tiles.size > 32) tiles.delete(tiles.keys().next().value);
-  return c;
-}
-
-function background(ctx, th, camX, t) {
-  const m = ctx.getTransform();
-  if (LIVE.has(th.decor) || m.a > 3) { paper(ctx, th); decor(ctx, th, camX, t); return; } // huge canvas: too much memory
-  const par = camX * 0.3;
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // draw in device pixels, each tile at a whole pixel
-  const top = Math.round(m.f);
-  for (let j = Math.floor(par / TILE); j * TILE - par < W; j++) {
-    ctx.drawImage(tileFor(th, j, S.boil, m.a, m.d), Math.round(m.e + (j * TILE - par) * m.a), top);
-  }
-  ctx.setTransform(m);
-}
-
 // ---------------- world objects ----------------
-function drawGround(ctx, map, th, camX) {
-  if (th.water) { // water at the bottom of every pit
-    ctx.fillStyle = th.water; ctx.fillRect(0, G + 26, W, VIEW_H - G - 26);
-    curve(ctx, [[0, G + 26], [W / 4, G + 22], [W / 2, G + 28], [W * 3 / 4, G + 22], [W, G + 26]], 7, 'rgba(255,255,255,0.7)', 2);
+function drawGround(map, th, camX) {
+  if (th.water) { // water at the bottom of every pit, with a moving pixel ripple
+    box(0, G + 26, W, VIEW_H - G - 26, th.water);
+    const off = (camX * 0.5) % 40;
+    for (let x = -off; x < W; x += 40) box(x, G + 28, 16, 2, '#ffffff');
   }
   for (let gi = 0; gi < map.ground.length; gi++) {
     const [x1, x2] = map.ground[gi];
     if (x2 < camX - 20 || x1 > camX + W + 20) continue;
     const a = Math.max(x1, camX - 30), b = Math.min(x2, camX + W + 30);
     const sx = a - camX, w = b - a;
-    ctx.fillStyle = th.ground; ctx.fillRect(sx, G, w, VIEW_H - G);
-    hatch(ctx, sx, G + 8, w, VIEW_H - G, 'rgba(0,0,0,0.15)', 12, gi);
-    line(ctx, sx, G, sx + w, G, gi * 3 + 1, 1.2, INK, 2.6);
-    ctx.fillStyle = th.top; ctx.fillRect(sx, G + 1, w, 5);
-    if (x1 >= camX - 30) line(ctx, x1 - camX, G, x1 - camX, VIEW_H, gi * 3 + 2, 1.2);
-    if (x2 <= camX + W + 30) line(ctx, x2 - camX, G, x2 - camX, VIEW_H, gi * 3 + 3, 1.2);
+    box(sx, G, w, VIEW_H - G, th.ground);
+    // world-anchored speckles (stones, grain) so the floor visibly scrolls
+    const dk = shade(th.ground, 0.18), lt = light(th.ground, 0.18);
+    for (let x = Math.ceil(a / 18) * 18; x < b; x += 18) {
+      const h1 = hash(x), h2 = hash(x + 7);
+      box(x - camX, G + 14 + h1 * 40, 4, 2, dk);
+      if (h2 > 0.55) box(x - camX + 8, G + 30 + h2 * 24, 2, 2, lt);
+    }
+    box(sx, G, w, 8, th.top);
+    box(sx, G, w, 2, light(th.top, 0.3));
+    box(sx, G + 8, w, 2, shade(th.ground, 0.3));
+    if (x1 >= camX - 30) box(x1 - camX, G, 2, VIEW_H - G, INK);
+    if (x2 <= camX + W + 30) box(x2 - camX - 2, G, 2, VIEW_H - G, INK);
     if (th.decor === 'hills') { // grass tufts
       for (let x = Math.ceil(a / 47) * 47; x < b; x += 47) {
         const gx = x - camX;
-        line(ctx, gx, G, gx - 4, G - 8, x, 1, '#3f8f3a', 1.6); line(ctx, gx + 3, G, gx + 5, G - 9, x + 1, 1, '#3f8f3a', 1.6);
+        box(gx - 4, G - 6, 2, 6, '#3f8f3a'); box(gx, G - 10, 2, 10, '#3f8f3a'); box(gx + 4, G - 6, 2, 6, '#3f8f3a');
       }
     }
   }
 }
 
-function drawSolid(ctx, o, th, camX, i) {
+function drawSolid(o, th, camX) {
   const x = o.x - camX;
   if (x > W + 10 || x + o.w < -10) return;
   const kind = o.kind;
   if (kind === 'beam') {
     const y0 = Math.max(o.y, -5), h = o.y + o.h - y0;
-    rect(ctx, x, y0, o.w, h, i, th.beam);
-    for (let px = 22; px < o.w - 6; px += 26) line(ctx, x + px, y0 + 4, x + px, y0 + h - 14, i * 31 + px, 1, 'rgba(0,0,0,0.25)', 1.4);
-    // warning stripes on the lower edge
-    ctx.save(); ctx.beginPath(); ctx.rect(x + 2, y0 + h - 12, o.w - 4, 10); ctx.clip();
-    ctx.fillStyle = '#ffd23f'; ctx.fillRect(x, y0 + h - 12, o.w, 10);
-    ctx.fillStyle = INK;
-    for (let sx = -10; sx < o.w; sx += 18) { ctx.beginPath(); ctx.moveTo(x + sx, y0 + h); ctx.lineTo(x + sx + 8, y0 + h - 12); ctx.lineTo(x + sx + 16, y0 + h - 12); ctx.lineTo(x + sx + 8, y0 + h); ctx.fill(); }
-    ctx.restore();
-    line(ctx, x, y0 + h - 12, x + o.w, y0 + h - 12, i + 5, 1, INK, 1.6);
+    rect(0, x, y0, o.w, h, 0, th.beam, INK);
+    box(x + 2, y0, 4, h - 12, light(th.beam, 0.25));
+    for (let px = 22; px < o.w - 6; px += 26) box(x + px, y0 + 4, 2, h - 18, shade(th.beam, 0.2));
+    stripes(x, y0 + h - 12, o.w, 12, '#ffd23f', INK, 18); // warning tape on the lower edge
+    box(x, y0 + h - 14, o.w, 2, INK);
   } else if (kind === 'pipe') {
     const top = o.y === 0;
     const y0 = top ? -5 : o.y, y1 = top ? o.y + o.h : Math.min(o.y + o.h, VIEW_H + 5);
-    rect(ctx, x + 4, y0, o.w - 8, y1 - y0, i, th.pipe);
-    line(ctx, x + 14, y0 + 6, x + 14, y1 - 6, i + 3, 1, 'rgba(255,255,255,0.6)', 3);
-    if (th.decor === 'night') for (let by = (top ? y1 - 20 : y0 + 26); top ? by > y0 : by < y1; by += top ? -18 : 18) line(ctx, x + 6, by, x + o.w - 6, by, i * 7 + by, 0.8, 'rgba(0,0,0,0.3)', 1.2);
+    rect(0, x + 4, y0, o.w - 8, y1 - y0, 0, th.pipe, INK);
+    box(x + 10, y0, 6, y1 - y0, light(th.pipe, 0.45));
+    box(x + o.w - 16, y0, 6, y1 - y0, shade(th.pipe, 0.2));
+    if (th.decor === 'night') for (let by = (top ? y1 - 20 : y0 + 26); top ? by > y0 : by < y1; by += top ? -18 : 18) box(x + 6, by, o.w - 12, 2, 'rgba(0,0,0,0.3)');
     const ly = top ? y1 - 18 : y0;
-    rect(ctx, x - 2, ly, o.w + 4, 18, i + 9, th.pipe);
+    rect(0, x - 2, ly, o.w + 4, 18, 0, th.pipe, INK);
+    box(x + 4, ly + 2, o.w - 8, 4, light(th.pipe, 0.45));
   } else if (kind === 'ledge') {
-    rect(ctx, x, o.y, o.w, o.h, i, th.box);
-    hatch(ctx, x, o.y, o.w, o.h, 'rgba(0,0,0,0.2)', 8, i);
-    line(ctx, x + 10, o.y + o.h, x + 18, o.y + o.h + 14, i + 1, 1, INK, 1.6);
-    line(ctx, x + o.w - 10, o.y + o.h, x + o.w - 18, o.y + o.h + 14, i + 2, 1, INK, 1.6);
-  } else { // crate
-    rect(ctx, x, o.y, o.w, o.h, i, th.box);
-    hatch(ctx, x, o.y, o.w, o.h, 'rgba(0,0,0,0.12)', 10, i);
-    rect(ctx, x + 5, o.y + 5, o.w - 10, o.h - 10, i + 77, null, 'rgba(0,0,0,0.45)', 1, 1.4);
+    rect(0, x, o.y, o.w, o.h, 0, th.box, INK);
+    hatch(0, x, o.y, o.w, o.h, shade(th.box, 0.2), 8);
+    line(0, x + 10, o.y + o.h, x + 18, o.y + o.h + 14, 0, 0, INK, 2);
+    line(0, x + o.w - 10, o.y + o.h, x + o.w - 18, o.y + o.h + 14, 0, 0, INK, 2);
+  } else { // crate: planks, a dark frame and a cross brace
+    rect(0, x, o.y, o.w, o.h, 0, th.box, INK);
+    const dk = shade(th.box, 0.25);
+    for (let py = o.y + 12; py < o.y + o.h - 6; py += 12) box(x + 2, py, o.w - 4, 2, shade(th.box, 0.12));
+    rect(0, x + 6, o.y + 6, o.w - 12, o.h - 12, 0, null, dk);
+    line(0, x + 8, o.y + o.h - 8, x + o.w - 8, o.y + 8, 0, 0, dk, 3);
+    box(x + 2, o.y + 2, o.w - 4, 2, light(th.box, 0.4));
   }
 }
 
-function drawSpike(ctx, s, th, camX, i) {
+function drawSpike(s, th, camX) {
   const x = s.x - camX;
   if (x > W + 10 || x + s.w < -10) return;
   const pts = s.dir === 'down'
     ? [[x, s.y], [x + s.w, s.y], [x + s.w / 2, s.y + s.h]]
     : [[x, s.y + s.h], [x + s.w / 2, s.y], [x + s.w, s.y + s.h]];
-  poly(ctx, pts, i * 3 + 1, th.spike, INK, 1, 2);
-  const tipY = s.dir === 'down' ? s.y + s.h - 7 : s.y + 7;
-  line(ctx, x + s.w / 2, tipY, x + s.w / 2 + 2, tipY + (s.dir === 'down' ? -10 : 10), i, 0.5, '#d33', 2);
+  poly(0, pts, 0, th.spike, INK);
+  // a lit left face and a red tip
+  const tipY = s.dir === 'down' ? s.y + s.h - 6 : s.y + 4;
+  poly(0, s.dir === 'down' ? [[x + 4, s.y + 2], [x + s.w / 2, s.y + 2], [x + s.w / 2, s.y + s.h - 6]] : [[x + 4, s.y + s.h - 2], [x + s.w / 2, s.y + 6], [x + s.w / 2, s.y + s.h - 2]], 0, light(th.spike, 0.5), null);
+  box(x + s.w / 2 - 2, tipY - 2, 4, 4, '#dd3333');
 }
 
 // crumpled foil ball; rot = how far it has rolled (radians)
-function drawFoil(ctx, x, by, rot, seed) {
+function drawFoil(x, by, rot, seed) {
   const R = C.FOIL / 2, cx = x + R, cy = by - R, pts = [];
-  for (let k = 0; k < 11; k++) {
-    const a = rot + (k / 11) * Math.PI * 2, rr = R * (0.82 + hash(seed * 11 + k) * 0.3);
+  for (let k = 0; k < 9; k++) {
+    const a = rot + (k / 9) * Math.PI * 2, rr = R * (0.85 + hash(seed * 11 + k) * 0.25);
     pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
   }
-  poly(ctx, pts, seed, '#cfd6de', INK, 0.6, 1.8);
-  for (let k = 0; k < 3; k++) { // crinkles + a shine
-    const a = rot + k * 2.1 + hash(seed + k) * 0.6;
-    line(ctx, cx + Math.cos(a) * R * 0.15, cy + Math.sin(a) * R * 0.15, cx + Math.cos(a + 0.5) * R * 0.75, cy + Math.sin(a + 0.5) * R * 0.75, seed * 3 + k, 0.4, 'rgba(43,43,43,0.45)', 1.1);
-  }
-  ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(cx - R * 0.35, cy - R * 0.4, 2.2, 0, Math.PI * 2); ctx.fill();
+  poly(0, pts, 0, '#cfd6de', INK);
+  for (let k = 0; k < 2; k++) { const a = rot + k * 2.6; box(cx + Math.cos(a) * R * 0.4 - 1, cy + Math.sin(a) * R * 0.4 - 1, 3, 3, '#8d96a3'); }
+  box(cx - R * 0.5, cy - R * 0.55, 4, 4, '#ffffff');
 }
 
-function drawFoils(ctx, map, sim, camX) {
+function drawFoils(map, sim, camX) {
   if (!map.movers) return;
   for (let j = 0; j < map.movers.length; j++) {
     const m = map.movers[j], b = j * 4;
@@ -290,184 +297,177 @@ function drawFoils(ctx, map, sim, camX) {
     if (sx < -40 || sx > W + 40 || by > VIEW_H + C.FOIL) continue;
     if (by < G - 4) { // in the air: a shadow on the floor shows where it will land
       const k = Math.max(0.25, 1 - (G - by) / 340);
-      ctx.fillStyle = `rgba(0,0,0,${0.25 * k})`; ctx.beginPath(); ctx.ellipse(sx + C.FOIL / 2, G - 2, 13 * k, 4 * k, 0, 0, Math.PI * 2); ctx.fill();
+      oval(sx + C.FOIL / 2, G - 2, 13 * k, 4 * k, `rgba(0,0,0,${0.3 * k})`);
     }
-    if (by > -C.FOIL) drawFoil(ctx, sx, by, (x - m.x) / (C.FOIL / 2), j + 1);
+    if (by > -C.FOIL) drawFoil(sx, by, (x - m.x) / (C.FOIL / 2), j + 1);
   }
 }
 
-function drawCheese(ctx, x, y, gold, seed, t, scale = 1) {
-  const b = t ? Math.sin(t / 220 + seed) * 3 : 0;
+function drawCheese(ctx, x, y, gold, seed, t, scl = 1) {
+  const b = t ? Math.round(Math.sin(t / 220 + seed) * 2) * 2 : 0; // bob in whole pixels
   y += b;
-  const s = 13 * scale;
-  if (gold && t) {
-    ctx.fillStyle = 'rgba(255,215,64,0.35)';
-    ctx.beginPath(); ctx.arc(x, y, s * 1.8, 0, Math.PI * 2); ctx.fill();
-  }
-  poly(ctx, [[x - s, y + s * 0.7], [x + s, y + s * 0.7], [x + s, y - s * 0.2], [x - s * 0.6, y - s * 0.8]], seed, gold ? '#ffb300' : '#ffd84d', INK, 0.8, 1.8);
-  ctx.fillStyle = gold ? '#c77d00' : '#e3a90c';
-  ctx.beginPath(); ctx.arc(x - s * 0.2, y + s * 0.15, s * 0.22, 0, Math.PI * 2); ctx.arc(x + s * 0.5, y - s * 0.05, s * 0.15, 0, Math.PI * 2); ctx.fill();
-  if (gold) star(ctx, x + s, y - s, 5 + Math.sin(t / 120) * 2, seed + 3, '#fff6b0');
+  const s = 13 * scl;
+  if (gold && t) oval(x, y, s * 1.6, s * 1.6, 'rgba(255,215,64,0.3)');
+  poly(0, [[x - s, y + s * 0.7], [x + s, y + s * 0.7], [x + s, y - s * 0.2], [x - s * 0.6, y - s * 0.8]], 0, gold ? '#ffb300' : '#ffd84d', INK);
+  poly(0, [[x - s * 0.6, y - s * 0.8], [x + s, y - s * 0.2], [x + s * 0.4, y - s * 0.2]], 0, gold ? '#ffd970' : '#fff0a0', null); // lit top
+  disc(x - s * 0.2, y + s * 0.2, s * 0.22, gold ? '#c77d00' : '#e3a90c');
+  disc(x + s * 0.5, y + s * 0.05, s * 0.16, gold ? '#c77d00' : '#e3a90c');
+  if (gold && t) star(0, x + s, y - s, 4 + Math.round(Math.abs(Math.sin(t / 160))) * 2, 0, '#fff6b0');
 }
 
 const TOUCH_SIGNS = {
   cs: [['(A / ←)', '(ťuk vlevo)'], ['(D / →)', '(drž prst vpravo)'], ['(A A A)', '(ťuk ťuk ťuk vlevo)']],
   en: [['(A / ←)', '(tap left)'], ['(D / →)', '(hold finger right)'], ['(A A A)', '(tap tap tap left)']],
 };
-// salmon: the special yummy (3 per map). Jumps around and sparkles.
 // the rare goldfish: pops in with a burst, then shimmers
-function drawGoldfish(ctx, x, y, t, age) {
-  const pop = age < 300 ? age / 300 : 1, bob = Math.sin(t / 200) * 4;
-  ctx.save(); ctx.translate(x, y + bob); ctx.scale(pop, pop); ctx.rotate(Math.sin(t / 300) * 0.2);
-  ctx.fillStyle = `rgba(255,210,63,${0.35 + 0.2 * Math.sin(t / 120)})`; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
-  poly(ctx, [[-14, 0], [-30, -14], [-24, 0], [-30, 14]], 71, '#ff9f1c', INK, 0.6, 1.8); // flowing tail
-  ellipse(ctx, 0, 0, 17, 12, 72, '#ffb300', INK, 0.8, 2);
-  poly(ctx, [[-4, -11], [4, -19], [9, -10]], 73, '#ff9f1c', INK, 0.4, 1.4);
-  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(9, -3, 4, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(10, -3, 2, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-  for (let k = 0; k < 3; k++) star(ctx, x + Math.cos(t / 250 + k * 2.1) * 30, y + bob + Math.sin(t / 250 + k * 2.1) * 22, 3 + 2 * Math.abs(Math.sin(t / 150 + k)), 74 + k, '#fff6b0');
+function drawGoldfish(x, y, t, age) {
+  const pop = age < 300 ? age / 300 : 1, bob = Math.round(Math.sin(t / 200) * 2) * 2;
+  save(); translate(x, y + bob); scale(pop, pop);
+  oval(0, 0, 28, 28, `rgba(255,210,63,${0.3 + 0.15 * Math.sin(t / 120)})`);
+  poly(0, [[-14, 0], [-30, -14], [-24, 0], [-30, 14]], 0, '#ff9f1c', INK); // flowing tail
+  ellipse(0, 0, 0, 17, 12, 0, '#ffb300', INK);
+  box(-10, -8, 14, 4, '#ffe08a');
+  poly(0, [[-4, -11], [4, -19], [9, -10]], 0, '#ff9f1c', INK);
+  disc(9, -3, 4, '#fff'); disc(10, -3, 2, INK);
+  restore();
+  for (let k = 0; k < 3; k++) star(0, x + Math.cos(t / 250 + k * 2.1) * 30, y + bob + Math.sin(t / 250 + k * 2.1) * 22, 3 + 2 * Math.abs(Math.sin(t / 150 + k)), 0, '#fff6b0');
 }
 
-export function drawSalmon(ctx, x, y, seed, t, scale = 1) {
-  const hop = t ? Math.abs(Math.sin(t / 260 + seed)) * -6 : 0;
-  const tilt = t ? Math.sin(t / 260 + seed) * 0.25 : -0.15;
-  ctx.save(); ctx.translate(x, y + hop); ctx.rotate(tilt); ctx.scale(scale, scale);
+export function drawSalmon(ctx, x, y, seed, t, scl = 1) {
+  const hop = t ? Math.round(Math.abs(Math.sin(t / 260 + seed)) * -3) * 2 : 0;
+  save(); translate(x, y + hop); scale(scl, scl);
+  if (t) oval(0, 0, 26, 26, `rgba(255,140,105,${0.22 + 0.12 * Math.sin(t / 150 + seed)})`);
+  poly(0, [[-16, 0], [-28, -11], [-25, 0], [-28, 11]], 0, '#f26d50', INK); // tail
+  ellipse(0, 0, 0, 19, 10, 0, '#ff8c69', INK);
+  save(); clipEllipse(0, 0, 18, 9);
+  box(-20, 2, 40, 10, '#ffd0bf'); // belly
+  for (const sx of [-8, -1, 6]) box(sx, -9, 3, 9, '#d9503a'); // stripes
+  box(-12, -7, 8, 2, '#ffb39a'); // shine
+  restore();
+  poly(0, [[-4, -9], [3, -15], [8, -8]], 0, '#f26d50', INK); // fin
+  disc(12, -2, 2, INK);
+  restore();
   if (t) {
-    const g = 0.25 + 0.15 * Math.sin(t / 150 + seed);
-    ctx.fillStyle = `rgba(255,140,105,${g})`;
-    ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fill();
-  }
-  poly(ctx, [[-16, 0], [-28, -11], [-25, 0], [-28, 11]], seed + 1, '#f26d50', INK, 0.6, 1.8); // tail
-  ellipse(ctx, 0, 0, 19, 10, seed + 2, '#ff8c69', INK, 0.8, 2);
-  ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, 18, 9, 0, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = '#ffd0bf'; ctx.fillRect(-20, 2, 40, 10);                 // belly
-  for (const sx of [-8, -1, 6]) line(ctx, sx, -8, sx + 3, 2, seed + sx, 0.4, '#d9503a', 1.6); // stripes
-  ctx.restore();
-  poly(ctx, [[-4, -9], [3, -15], [8, -8]], seed + 3, '#f26d50', INK, 0.4, 1.4); // fin
-  ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(12, -2, 2, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-  if (t) {
-    star(ctx, x + 18 + Math.sin(t / 200) * 4, y - 16 + hop, 4 + 2 * Math.abs(Math.sin(t / 170)), seed + 5, '#fff6b0');
-    star(ctx, x - 20, y + 12 + hop, 3 + 2 * Math.abs(Math.cos(t / 190)), seed + 6, '#fff6b0');
+    star(0, x + 18 + Math.sin(t / 200) * 4, y - 16 + hop, 3 + 2 * Math.abs(Math.sin(t / 170)), 0, '#fff6b0');
+    star(0, x - 20, y + 12 + hop, 2 + 2 * Math.abs(Math.cos(t / 190)), 0, '#fff6b0');
   }
 }
 
-function drawSign(ctx, sg, lang, camX, touch) {
+function drawSign(sg, lang, camX, touch) {
   const x = sg.x - camX;
   if (x < -300 || x > W + 300) return;
   let str = sg[lang] || sg.cs;
   if (touch) for (const [a, b] of TOUCH_SIGNS[lang] || []) str = str.replace(a, b);
   const SPEED = { '>>>': ['RYCHLE! >>>', 'FAST! >>>'], '<<': ['<< POMALU', '<< SLOW'], '=': ['NORMÁLNÍ RYCHLOST', 'NORMAL SPEED'] };
   if (SPEED[str]) str = SPEED[str][lang === 'cs' ? 0 : 1];
-  ctx.font = '20px "Patrick Hand", cursive';
-  const w = Math.max(50, ctx.measureText(str).width + 26);
-  line(ctx, x, G, x, G - 130, sg.x, 1, INK, 3);
-  rect(ctx, x - w / 2, G - 170, w, 40, sg.x + 1, '#fff7d6');
-  text(ctx, str, x, G - 150, 20);
+  const w = Math.max(50, textWidth(str, textScale(20)) / K + 28);
+  rect(0, x - 3, G - 130, 6, 130, 0, '#8d5a3b', INK);
+  rect(0, x - w / 2, G - 172, w, 44, 0, '#fff7d6', INK);
+  box(x - w / 2 + 2, G - 132, w - 4, 2, '#e6d9a8');
+  text(0, str, x, G - 150, 20, INK);
 }
 
-function drawFinish(ctx, map, camX, t, trapClose) {
+function drawFinish(map, camX, t, trapClose) {
   const fx = map.length + C.MOUSE_W - camX;
   if (fx < W + 40 && fx > -60) {
-    line(ctx, fx, G, fx, G - 120, 5, 1, INK, 3);
+    rect(0, fx - 2, G - 124, 6, 124, 0, '#8d5a3b', INK);
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
-      const wave = Math.sin(t / 150 + c) * 3;
-      ctx.fillStyle = (r + c) % 2 ? INK : '#fff';
-      ctx.fillRect(fx + c * 12, G - 120 + r * 10 + wave, 12, 10);
+      const wave = Math.round(Math.sin(t / 150 + c) * 1.5) * 2;
+      box(fx + 4 + c * 12, G - 120 + r * 10 + wave, 12, 10, (r + c) % 2 ? INK : '#fff');
     }
-    rect(ctx, fx, G - 120, 48, 30, 6, null, INK, 1, 1.6);
   }
   const tx = map.length + TRAP_OFFSET - camX;
   if (tx > W + 120 || tx < -160) return;
-  drawTrap(ctx, tx, trapClose, t);
+  drawTrap(0, tx, trapClose, t);
 }
 
 export function drawTrap(ctx, tx, close, t) {
-  // board
-  rect(ctx, tx - 50, G - 14, 100, 14, 11, '#d9a066');
-  hatch(ctx, tx - 50, G - 14, 100, 14, 'rgba(120,70,20,0.3)', 7, 12);
-  // spring coil
-  ellipse(ctx, tx, G - 16, 8, 6, 13, '#c7ccd3', INK, 0.6, 1.6);
-  if (close < 0.5) drawCheese(ctx, tx + 26, G - 22, false, 2, t, 0.7);
-  if (close < 1) trapBar(ctx, tx, close);
+  rect(0, tx - 50, G - 14, 100, 14, 0, '#d9a066', INK); // board
+  box(tx - 48, G - 12, 96, 2, '#f0c08a');
+  hatch(0, tx - 48, G - 10, 96, 8, 'rgba(120,70,20,0.35)', 8);
+  ellipse(0, tx, G - 16, 8, 6, 0, '#c7ccd3', INK); // spring coil
+  if (close < 0.5) drawCheese(0, tx + 26, G - 22, false, 2, t, 0.7);
+  if (close < 1) trapBar(0, tx, close);
 }
 
 // the snapping bar; drawn again over the mouse once the trap has closed
 export function trapBar(ctx, tx, close) {
-  // bar rotates around (tx, G-14) from lying left (open) to lying right (closed)
-  const ang = Math.PI - close * Math.PI; // PI = left, 0 = right
+  const ang = Math.PI - close * Math.PI; // PI = left (open), 0 = right (closed)
   const len = 44;
   const ex = tx + Math.cos(ang) * len, ey = G - 14 - Math.sin(ang) * len * 0.9 - 2;
-  line(ctx, tx, G - 16, ex, ey, 14, 0.6, '#7d838b', 3.2);
-  line(ctx, ex, ey, ex, ey - (close > 0 && close < 1 ? 6 : 0), 15, 0.4, '#7d838b', 3.2);
+  line(0, tx, G - 16, ex, ey, 0, 0, INK, 6);
+  line(0, tx, G - 16, ex, ey, 0, 0, '#9aa1aa', 3);
+  if (close > 0 && close < 1) line(0, ex, ey, ex, ey - 6, 0, 0, '#9aa1aa', 4);
 }
 
 // ---------------- characters ----------------
 export function drawMouse(ctx, x, by, o = {}) {
   const h = o.duck ? C.DUCK_H : C.MOUSE_H;
   const t = o.t || 0;
-  const alpha = o.alpha ?? 1;
-  ctx.save(); ctx.globalAlpha = alpha;
+  save(); alpha(o.alpha ?? 1);
   const pal = o.ghost ? null : o.pal || SKIN.mouse, mx = pal && pal.mix; // mx: second colour + pattern
   const body = o.ghost ? '#9fc3ff' : pal?.hex || '#b8b2c8', ink = o.ghost ? '#3d5a8c' : INK;
   const ear = o.ghost ? '#cfe0ff' : mx && mx.pat === 'points' ? mx.hex : '#f7a1b5';
-  const seed = o.ghost ? 900 : 100;
   const cy = by - h / 2 - 1;
   const phase = Math.floor(t / 70) % 4;
   // tail
-  curve(ctx, [[x + 2, cy + 2], [x - 10, cy - 4 + (phase % 2) * 4], [x - 20, cy + 2], [x - 26, cy - 8]], seed + 1, ear, 2.2);
+  curve(0, [[x + 2, cy + 2], [x - 10, cy - 4 + (phase % 2) * 4], [x - 20, cy + 2], [x - 26, cy - 8]], 0, ear, 3);
   // legs
   if (!o.dead) {
     const air = o.air;
-    const l1 = air ? 4 : [0, 5, 0, -5][phase], l2 = air ? -4 : -l1;
-    line(ctx, x + 8, by - 3, x + 8 + l1, by + 1, seed + 2, 0.5, ink, 2);
-    line(ctx, x + 22, by - 3, x + 22 + l2, by + 1, seed + 3, 0.5, ink, 2);
+    const l1 = air ? 4 : [0, 4, 0, -4][phase], l2 = air ? -4 : -l1;
+    box(x + 6 + l1, by - 4, 4, 5, ink);
+    box(x + 20 + l2, by - 4, 4, 5, ink);
   }
-  // body
+  // body, with a lit back and a darker belly line
   const ry = Math.max(7, h / 2 + 1);
-  ellipse(ctx, x + 14, cy, 16, ry, seed + 4, body, ink, 1, 2);
-  if (mx) mousePattern(ctx, mx, x + 14, cy, ry, seed);
+  ellipse(0, x + 14, cy, 16, ry, 0, body, ink);
+  if (!o.ghost) {
+    save(); clipEllipse(x + 14, cy, 16, ry);
+    box(x - 2, cy + ry - 4, 32, 4, shade(body, 0.18));
+    box(x + 4, cy - ry + 2, 14, 2, light(body, 0.4));
+    restore();
+  }
+  if (mx) mousePattern(mx, x + 14, cy, ry);
   // head
   const hx = x + 28, hy = o.duck ? by - 8 : cy - 4;
-  ellipse(ctx, hx, hy, 10, 9, seed + 5, mx && mx.pat === 'points' ? mx.hex : body, ink, 0.8, 2);
-  if (mx && mx.pat === 'patches') { ctx.fillStyle = mx.hex; ctx.beginPath(); ctx.ellipse(hx - 2, hy - 2, 4, 3.5, 0.4, 0, Math.PI * 2); ctx.fill(); }
-  ellipse(ctx, hx - 4, hy - (o.duck ? 7 : 10), 6, 6, seed + 6, ear, ink, 0.6, 1.8);
+  ellipse(0, hx, hy, 10, 9, 0, mx && mx.pat === 'points' ? mx.hex : body, ink);
+  if (mx && mx.pat === 'patches') oval(hx - 2, hy - 2, 4, 3.5, mx.hex, 0.4);
+  ellipse(0, hx - 4, hy - (o.duck ? 7 : 10), 6, 6, 0, ear, ink);
+  box(hx - 6, hy - (o.duck ? 9 : 12), 4, 4, light(ear, 0.4));
   // nose + eye
-  ctx.fillStyle = '#ff6f91'; ctx.beginPath(); ctx.arc(hx + 10, hy + 1, 2.6, 0, Math.PI * 2); ctx.fill();
+  disc(hx + 10, hy + 1, 3, '#ff6f91');
   if (o.dead) {
-    line(ctx, hx + 1, hy - 5, hx + 6, hy, seed + 7, 0.3, ink, 1.6); line(ctx, hx + 6, hy - 5, hx + 1, hy, seed + 8, 0.3, ink, 1.6);
+    line(0, hx + 1, hy - 5, hx + 6, hy, 0, 0, ink, 2); line(0, hx + 6, hy - 5, hx + 1, hy, 0, 0, ink, 2);
   } else {
-    ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(hx + 3, hy - 2, o.scared ? 2.6 : 1.8, 0, Math.PI * 2); ctx.fill();
+    box(hx + 1, hy - 4, o.scared ? 6 : 4, o.scared ? 6 : 4, ink);
+    if (!o.scared) box(hx + 1, hy - 4, 2, 2, '#ffffff');
   }
   // whiskers
-  line(ctx, hx + 9, hy + 2, hx + 18, hy - 1, seed + 9, 0.4, ink, 1);
-  line(ctx, hx + 9, hy + 3, hx + 18, hy + 5, seed + 10, 0.4, ink, 1);
-  ctx.restore();
+  box(hx + 10, hy + 2, 8, 2, ink);
+  restore();
 }
 
-// second colour on the mouse's body, clipped to the body ellipse
-function mousePattern(ctx, mx, cx, cy, ry, seed) {
-  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, 15, ry - 1, 0, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = mx.hex; ctx.strokeStyle = mx.hex; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  if (mx.pat === 'tabby') { ctx.beginPath(); for (const dx of [-7, 0, 7]) { ctx.moveTo(cx + dx - 2, cy - ry); ctx.lineTo(cx + dx + 2, cy + ry * 0.2); } ctx.stroke(); }
-  else if (mx.pat === 'twotone') ctx.fillRect(cx - 16, cy + ry * 0.15, 32, ry); // belly
-  else if (mx.pat === 'patches') { ctx.beginPath(); ctx.ellipse(cx - 5, cy - 2, 5, 4, 0.5, 0, Math.PI * 2); ctx.ellipse(cx + 6, cy + 3, 3.5, 3, 0, 0, Math.PI * 2); ctx.fill(); }
-  else if (mx.pat === 'points') { ctx.beginPath(); ctx.ellipse(cx - 15, cy, 6, ry, 0, 0, Math.PI * 2); ctx.fill(); } // darker rump
-  ctx.restore();
+// second colour on the mouse's body, kept inside the body
+function mousePattern(mx, cx, cy, ry) {
+  save(); clipEllipse(cx, cy, 15, ry - 1);
+  if (mx.pat === 'tabby') for (const dx of [-7, 0, 7]) box(cx + dx - 2, cy - ry, 4, ry * 1.2, mx.hex);
+  else if (mx.pat === 'twotone') box(cx - 16, cy + ry * 0.15, 32, ry, mx.hex); // belly
+  else if (mx.pat === 'patches') { oval(cx - 5, cy - 2, 5, 4, mx.hex, 0.5); oval(cx + 6, cy + 3, 3.5, 3, mx.hex); }
+  else if (mx.pat === 'points') oval(cx - 15, cy, 6, ry, mx.hex); // darker rump
+  restore();
 }
 
-function bubble(ctx, x, y, str, color, seed, age) {
+function bubble(x, y, str, color, age) {
   if (age > 650) return;
-  const pop = age < 90 ? 0.6 + (age / 90) * 0.5 : 1.1 - Math.min(0.1, (age - 90) / 900);
-  ctx.save(); ctx.translate(x, y); ctx.scale(pop, pop);
-  ctx.font = '26px "Patrick Hand", cursive';
-  const w = ctx.measureText(str).width + 24;
-  ellipse(ctx, 0, 0, w / 2 + 4, 22, seed, '#fff', INK, 1.5, 2);
-  poly(ctx, [[-10, 16], [-22, 34], [2, 19]], seed + 1, '#fff', null);
-  line(ctx, -10, 18, -22, 34, seed + 2, 0.5, INK, 2); line(ctx, -22, 34, 1, 20, seed + 3, 0.5, INK, 2);
-  text(ctx, str, 0, 1, 26, color);
-  ctx.restore();
+  const pop = age < 90 ? 0.6 + (age / 90) * 0.5 : 1;
+  save(); translate(x, y); scale(pop, pop);
+  const w = textWidth(str, textScale(26)) / K + 30;
+  poly(0, [[-12, 14], [-24, 36], [4, 16]], 0, '#fff', INK);
+  rect(0, -w / 2, -22, w, 44, 0, '#fff', INK);
+  box(-w / 2 + 2, 18, w - 4, 2, '#d8d4e6');
+  text(0, str, 0, 0, 26, color);
+  restore();
 }
 
 // ---------------- HUD: the cat's behind ----------------
@@ -477,298 +477,317 @@ function wobble(age) {
   return Math.sin(tt * 38) * Math.exp(-tt * 7);
 }
 
-function hand(ctx, cx, cy, alpha, flip, seed) {
-  if (alpha <= 0) return;
-  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(cx, cy); ctx.rotate(flip ? 0.35 : -0.35); if (flip) ctx.scale(-1, 1);
-  const c = '#e23d55';
-  ellipse(ctx, 0, 6, 15, 17, seed, c, null);
-  const f = [[-13, -8, 4, 12, -0.5], [-6, -17, 4, 13, -0.15], [2, -19, 4, 13, 0], [10, -15, 4, 12, 0.2], [17, 2, 4, 10, 1.0]];
-  ctx.fillStyle = c;
-  for (const [x, y, rx, ry, r] of f) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, r, 0, Math.PI * 2); ctx.fill(); }
-  ctx.restore();
-}
-
-export function drawButt(ctx, bx, by, st, now, lang, scale = 0.8, o = {}) {
-  ctx.save(); ctx.translate(bx, by);
-  if (o.rot) ctx.rotate(o.rot);
-  ctx.scale(scale * (1 + (o.fat || 0) * 0.35), scale * (1 - (o.fat || 0) * 0.05));
-  drawButtInner(ctx, 0, 0, st, now, o);
-  ctx.restore();
+export function drawButt(ctx, bx, by, st, now, lang, scl = 0.8, o = {}) {
+  save(); translate(bx, by);
+  if (o.rot) rotate(o.rot);
+  scale(scl * (1 + (o.fat || 0) * 0.35), scl * (1 - (o.fat || 0) * 0.05));
+  drawButtInner(st, now, o);
+  restore();
 }
 
 // a cartoon hand (skin + sleeve) seen from the palm side, fingers pointing up
-function slapHand(ctx, x, y, s, rot, alpha, seed) {
-  if (alpha <= 0) return;
-  ctx.save(); ctx.globalAlpha = Math.min(1, alpha); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+function slapHand(x, y, s, rot, a) {
+  if (a <= 0) return;
+  save(); alpha(Math.min(1, a)); translate(x, y); rotate(rot); scale(s, s);
   const skin = '#ffd7b5';
-  rect(ctx, -16, 26, 32, 26, seed + 1, '#5b8def', INK, 0.8, 2.2); // sleeve
+  rect(0, -16, 26, 32, 26, 0, '#5b8def', INK); // sleeve
+  box(-14, 28, 28, 4, '#8fb4ff');
   for (const [fx, fy, len, r] of [[-15, -6, 20, -0.35], [-6, -16, 26, -0.1], [4, -17, 27, 0.05], [13, -12, 23, 0.2]]) {
-    ctx.save(); ctx.translate(fx, fy); ctx.rotate(r);
-    ellipse(ctx, 0, -len / 2 + 6, 5.5, len / 2 + 2, seed + fx, skin, INK, 0.5, 2);
-    ctx.restore();
+    save(); translate(fx, fy); rotate(r);
+    ellipse(0, 0, -len / 2 + 6, 5.5, len / 2 + 2, 0, skin, INK);
+    restore();
   }
-  ellipse(ctx, 22, 4, 6, 13, seed + 7, skin, INK, 0.5, 2, 0.9); // thumb
-  ellipse(ctx, 0, 8, 19, 21, seed + 8, skin, INK, 0.8, 2.2); // palm
-  curve(ctx, [[-8, 6], [0, 12], [8, 8]], seed + 9, 'rgba(160,90,60,0.6)', 1.4);
-  ctx.restore();
+  ellipse(0, 22, 4, 6, 13, 0, skin, INK, 0, 0, 0.9); // thumb
+  ellipse(0, 0, 8, 19, 21, 0, skin, INK); // palm
+  box(-8, 8, 16, 2, '#d9a184');
+  restore();
 }
 
-// comic "SLAP!" starburst
-function slapBurst(ctx, x, y, age, seed, rot) {
+// comic "SLAP!" starburst, two-tone with a hard shadow
+function slapBurst(x, y, age, seed, rot) {
   if (age > 480) return;
   const pop = age < 90 ? 0.4 + (age / 90) * 0.8 : 1.2 - Math.min(0.2, (age - 90) / 400);
-  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(pop, pop);
-  ctx.globalAlpha = age > 360 ? 1 - (age - 360) / 120 : 1;
-  const pts = [];
+  save(); translate(x, y); scale(pop, pop);
+  if (age > 360) alpha(1 - (age - 360) / 120);
+  const pts = [], inner = [];
   for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2, rr = i % 2 ? 30 : 52 + hash(seed + i) * 10;
+    const a = (i / 16) * Math.PI * 2 + rot, rr = i % 2 ? 30 : 52 + hash(seed + i) * 10;
     pts.push([Math.cos(a) * rr * 1.25, Math.sin(a) * rr * 0.8]);
+    inner.push([Math.cos(a) * rr * 0.9, Math.sin(a) * rr * 0.55]);
   }
-  poly(ctx, pts, seed, '#ffe14d', INK, 1.2, 2.4);
-  text(ctx, 'SLAP!', 0, 2, 34, '#e2302f', 'center', '#fff');
-  ctx.restore();
+  poly(0, pts.map(([px, py]) => [px + 6, py + 6]), 0, 'rgba(29,26,43,0.45)', null);
+  poly(0, pts, 0, '#ff8a2a', INK);
+  poly(0, inner, 0, '#ffe14d', null);
+  text(0, 'SLAP!', 0, 2, 34, '#e2302f', 'center', '#fff');
+  restore();
 }
 
-function drawButtInner(ctx, cx, cy, st, now, o = {}) {
+function drawButtInner(st, now, o = {}) {
+  const cx = 0, cy = 0;
   const pal = o.cat || SKIN.cat, orange = pal ? pal.hex : '#f39c34', dark = pal ? pal.dark : '#c96f1c';
   // mixes put the second colour (B) on: stripes (tabby), head/ears/paws/tail (points), cheeks/paws (two-tone), blobs (patches)
   const mx = pal && pal.mix, B = mx && mx.hex, pat = mx ? mx.pat : '';
   const earC = pat === 'points' ? B : orange, pawC = pat === 'points' || pat === 'twotone' ? B : orange;
   const tailC = pat === 'points' ? B : orange, headC = pat === 'points' ? B : orange, cheekC = pat === 'twotone' ? B : orange;
-  const stripeC = pat === 'tabby' ? B : pat === 'twotone' ? mx.dark : dark, stripeW = pat === 'tabby' ? 6 : 3;
+  const stripeC = pat === 'tabby' ? B : pat === 'twotone' ? mx.dark : dark, stripeW = pat === 'tabby' ? 8 : 5;
   const blob = (clip, x, y, rx, ry, rot) => { // a patch of B, kept inside the part it sits on
-    ctx.save(); ctx.beginPath(); ctx.ellipse(clip[0], clip[1], clip[2], clip[3], 0, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = B; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    save(); clipEllipse(clip[0], clip[1], clip[2], clip[3]); oval(x, y, rx, ry, B, rot); restore();
   };
+  const sheen = (clip, x, y, rx, ry, c) => { save(); clipEllipse(clip[0], clip[1], clip[2], clip[3]); oval(x, y, rx, ry, c); restore(); };
   const la = now - (st.left || -1e6), ra = now - (st.right || -1e6);
   const tailSwish = Math.sin(now / 260) * 12 + (la < 300 ? -20 : 0) + (ra < 300 ? 20 : 0);
   // head (behind)
-  poly(ctx, [[cx - 38, cy - 92], [cx - 30, cy - 128], [cx - 10, cy - 102]], 301, earC, INK, 0.8, 2.2);
-  poly(ctx, [[cx + 10, cy - 102], [cx + 30, cy - 128], [cx + 38, cy - 92]], 302, earC, INK, 0.8, 2.2);
-  poly(ctx, [[cx - 33, cy - 98], [cx - 29, cy - 118], [cx - 18, cy - 102]], 303, '#ffb3c6', null);
-  poly(ctx, [[cx + 18, cy - 102], [cx + 29, cy - 118], [cx + 33, cy - 98]], 304, '#ffb3c6', null);
-  ellipse(ctx, cx, cy - 86, 42, 34, 305, headC, INK, 1.2, 2.4); // points: dark face like a Siamese
+  poly(0, [[cx - 38, cy - 92], [cx - 30, cy - 128], [cx - 10, cy - 102]], 0, earC, INK);
+  poly(0, [[cx + 10, cy - 102], [cx + 30, cy - 128], [cx + 38, cy - 92]], 0, earC, INK);
+  poly(0, [[cx - 32, cy - 98], [cx - 29, cy - 116], [cx - 19, cy - 102]], 0, '#ffb3c6', null);
+  poly(0, [[cx + 19, cy - 102], [cx + 29, cy - 116], [cx + 32, cy - 98]], 0, '#ffb3c6', null);
+  ellipse(0, cx, cy - 86, 42, 34, 0, headC, INK); // points: dark face like a Siamese
+  sheen([cx, cy - 86, 41, 33], cx - 14, cy - 104, 18, 8, light(headC, 0.3));
   if (pat === 'patches') blob([cx, cy - 86, 41, 33], cx + 16, cy - 98, 15, 11, 0.3);
   // body
-  ellipse(ctx, cx, cy - 30, 92, 58, 306, orange, INK, 1.5, 2.6);
+  ellipse(0, cx, cy - 30, 92, 58, 0, orange, INK);
+  sheen([cx, cy - 30, 91, 57], cx - 30, cy - 66, 44, 14, light(orange, 0.25));
   if (pat === 'patches') { const bd = [cx, cy - 30, 91, 57]; blob(bd, cx - 50, cy - 52, 26, 17, -0.4); blob(bd, cx + 56, cy - 36, 18, 13, 0.5); }
   for (const s of [-1, 1]) {
-    curve(ctx, [[cx + s * 30, cy - 76], [cx + s * 44, cy - 54], [cx + s * 36, cy - 34]], 307 + s, stripeC, stripeW);
-    curve(ctx, [[cx + s * 60, cy - 60], [cx + s * 72, cy - 40], [cx + s * 66, cy - 22]], 309 + s, stripeC, stripeW);
+    curve(0, [[cx + s * 30, cy - 76], [cx + s * 44, cy - 54], [cx + s * 36, cy - 34]], 0, stripeC, stripeW);
+    curve(0, [[cx + s * 60, cy - 60], [cx + s * 72, cy - 40], [cx + s * 66, cy - 22]], 0, stripeC, stripeW);
   }
   // paws
-  ellipse(ctx, cx - 62, cy + 54, 22, 10, 311, pawC, INK, 0.8, 2);
-  ellipse(ctx, cx + 62, cy + 54, 22, 10, 312, pawC, INK, 0.8, 2);
+  ellipse(0, cx - 62, cy + 54, 22, 10, 0, pawC, INK);
+  ellipse(0, cx + 62, cy + 54, 22, 10, 0, pawC, INK);
   // cheeks
-  const cheek = (side, age, seed, held) => {
+  const cheek = (side, age, held) => {
     const w = held ? 0.55 : wobble(age);
     const x = cx + side * 50, y = cy + 14;
     const red = held ? 0.9 : age < 900 ? 1 - age / 900 : 0;
-    ctx.save(); ctx.translate(x, y); ctx.scale(1 + w * 0.18, 1 - w * 0.14);
-    const col = red > 0 ? mix(cheekC, '#ff5a5a', red * 0.75) : cheekC;
-    ellipse(ctx, 0, 0, 56, 50, seed, col, INK, 1.4, 2.6);
+    save(); translate(x, y); scale(1 + w * 0.18, 1 - w * 0.14);
+    const c = red > 0 ? mix(cheekC, '#ff5a5a', Math.round(red * 3) / 3 * 0.75) : cheekC; // reddening in 3 hard steps
+    ellipse(0, 0, 0, 56, 50, 0, c, INK);
+    sheen([0, 0, 55, 49], -side * 18, -26, 22, 10, light(c, 0.3));
+    sheen([0, 0, 55, 49], side * 10, 40, 50, 14, shade(c, 0.15));
     if (pat === 'patches' && side < 0) blob([0, 0, 55, 49], -14, 12, 20, 15, 0.6);
-    curve(ctx, [[side * 14, -30], [side * 30, -20], [side * 34, -2]], seed + 1, stripeC, stripeW);
-    ctx.restore();
-    hand(ctx, x + side * 6, y - 2, held ? 0 : red * 1.2, side > 0, seed + 3);
+    curve(0, [[side * 14, -30], [side * 30, -20], [side * 34, -2]], 0, stripeC, stripeW);
+    restore();
+    if (!held && red > 0) { // red handprint
+      save(); alpha(Math.min(1, red * 1.2)); translate(x + side * 6, y - 2); rotate(side > 0 ? 0.35 : -0.35);
+      oval(0, 6, 15, 17, '#e23d55');
+      for (const [fx, fy, rx, ry, r] of [[-13, -8, 4, 12, -0.5], [-6, -17, 4, 13, -0.15], [2, -19, 4, 13, 0], [10, -15, 4, 12, 0.2], [17, 2, 4, 10, 1.0]]) oval(fx * side, fy, rx, ry, '#e23d55', r * side);
+      restore();
+    }
   };
-  cheek(-1, la, 320, false);
-  cheek(1, ra, 330, !!st.rightHeld);
+  cheek(-1, la, false);
+  cheek(1, ra, !!st.rightHeld);
   // tail from the top of the crack
   const tx = cx, ty = cy - 30;
   const tip = [cx + 40 + tailSwish, cy - 128];
-  curve(ctx, [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip], 340, tailC, 13);
-  curve(ctx, [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip], 341, INK, 1.6);
+  const tailPts = [[tx, ty], [tx + 6 + tailSwish * 0.3, ty - 40], [tip[0] - 20, tip[1] + 20], tip];
+  curve(0, tailPts, 0, INK, 17);
+  curve(0, tailPts, 0, tailC, 12);
   // the slapping hand jumps onto the cheek (and stays there while the right one is held)
   const handAt = (side, age, held, upAge) => {
     const hx = cx + side * 56, hy = cy + 16;
-    let p, alpha = 1;
+    let p, a = 1;
     if (age < 70) p = age / 70;                       // flying in
     else if (held) p = 1;                              // pressing
     else {
       const away = side < 0 ? age - 230 : upAge;      // left leaves on its own, right on release
-      if (away < 0) p = 1; else { p = 1 - Math.min(1, away / 140); alpha = p; }
+      if (away < 0) p = 1; else { p = 1 - Math.min(1, away / 140); a = p; }
     }
     if (p <= 0) return;
     const fromX = hx + side * 110, fromY = hy - 90;
-    const shake = held && age > 70 ? Math.sin(now / 30) * 1.5 : 0;
-    slapHand(ctx, fromX + (hx - fromX) * p + shake, fromY + (hy - fromY) * p, 1.25 - p * 0.25, side * (0.5 - p * 0.3), alpha, 360 + side * 20);
+    const shake = held && age > 70 ? Math.round(Math.sin(now / 30)) * 2 : 0;
+    slapHand(fromX + (hx - fromX) * p + shake, fromY + (hy - fromY) * p, 1.25 - p * 0.25, side * (0.5 - p * 0.3), a);
   };
-  if (!o.noHands) {
-    handAt(-1, la, false, 0);
-    handAt(1, now - (st.right || -1e6), !!st.rightHeld, st.rightUp ? now - st.rightUp : 1e6);
-    slapBurst(ctx, cx - 150, cy - 70, la, 380, -0.2);
-    slapBurst(ctx, cx + 150, cy - 70, now - (st.right || -1e6), 390, 0.2);
-  }
-  // impact stars
   if (o.noHands) return;
+  handAt(-1, la, false, 0);
+  handAt(1, now - (st.right || -1e6), !!st.rightHeld, st.rightUp ? now - st.rightUp : 1e6);
+  slapBurst(cx - 150, cy - 70, la, 380, -0.2);
+  slapBurst(cx + 150, cy - 70, now - (st.right || -1e6), 390, 0.2);
+  // impact sparks flying off the cheek
   for (const [age, side] of [[la, -1], [ra, 1]]) {
     if (age < 260) {
       const p = age / 260;
-      for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2 + side;
-        star(ctx, cx + side * 50 + Math.cos(a) * (40 + p * 40), cy + 10 + Math.sin(a) * (30 + p * 30), 8 * (1 - p) + 2, 350 + i, '#ffd23f');
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + side;
+        star(0, cx + side * 50 + Math.cos(a) * (40 + p * 50), cy + 10 + Math.sin(a) * (30 + p * 40), 8 * (1 - p) + 3, 0, i % 2 ? '#ffd23f' : '#ffffff');
       }
     }
   }
 }
 
-function mix(a, b, t) {
-  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
-  const r = Math.round(((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t);
-  const g = Math.round(((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t);
-  const bl = Math.round((pa & 255) * (1 - t) + (pb & 255) * t);
-  return `rgb(${r},${g},${bl})`;
+function keycap(x, y, label) {
+  const w = Math.max(40, textWidth(label, textScale(20)) / K + 20);
+  rect(0, x - w / 2, y - 14, w, 34, 0, '#c9c4d8', INK); // key side
+  rect(0, x - w / 2, y - 18, w, 30, 0, '#fff', INK);
+  text(0, label, x, y - 3, 20);
 }
 
-function keycap(ctx, x, y, label, seed) {
-  ctx.font = '20px "Patrick Hand", cursive';
-  const w = Math.max(34, ctx.measureText(label).width + 16);
-  rect(ctx, x - w / 2, y - 16, w, 32, seed, '#fff', INK, 1, 2);
-  text(ctx, label, x, y, 20);
+function cushion(x, y) {
+  ellipse(0, x, y, 82, 22, 0, '#c84f7d', INK);
+  oval(x, y - 6, 66, 10, '#e0719a');
+  oval(x - 20, y - 10, 30, 4, '#f3a6c2');
+  for (const s of [-1, 1]) star(0, x + s * 78, y - 2, 6, 0, '#ffd23f');
 }
 
-function cushion(ctx, x, y) {
-  ellipse(ctx, x, y, 82, 22, 470, '#c84f7d', INK, 1.5, 2.4);
-  ellipse(ctx, x, y - 5, 68, 12, 471, '#e0719a', null);
-  for (const s of [-1, 1]) star(ctx, x + s * 78, y - 2, 6, 472 + s, '#ffd23f');
-}
-
-function hudPanel(ctx, v, now) {
+function hudPanel(v, now) {
   const L = v.lang;
-  // torn paper strip
-  ctx.fillStyle = '#fffaf0';
-  ctx.beginPath(); ctx.moveTo(0, VIEW_H + 6);
-  for (let x = 0; x <= W; x += 24) ctx.lineTo(x, VIEW_H + 4 + hash(x) * 6);
-  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(70,110,200,0.12)'; ctx.lineWidth = 1; ctx.beginPath();
-  for (let y = VIEW_H + 30; y < H; y += 24) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-  ctx.stroke();
-  line(ctx, 0, VIEW_H + 5, W, VIEW_H + 5, 400, 1.5, INK, 2.4);
-  line(ctx, 60, VIEW_H + 8, 60, H, 401, 1, 'rgba(226,87,76,0.45)', 1.6);
+  // desk strip: cream panel with a pixel edge and ruled lines
+  box(0, VIEW_H, W, H - VIEW_H, '#fffaf0');
+  for (let y = VIEW_H + 30; y < H; y += 24) box(0, y, W, 2, '#ece8f4');
+  box(60, VIEW_H, 2, H - VIEW_H, '#f3b8b0');
+  box(0, VIEW_H, W, 6, INK);
+  box(0, VIEW_H + 6, W, 2, '#d8d4e6');
 
-  if (v.leap) cushion(ctx, W / 2, VIEW_H + 150);
-  else drawButt(ctx, W / 2, VIEW_H + 110, v.butt, now, L);
+  if (v.leap) cushion(W / 2, VIEW_H + 150);
+  else drawButt(0, W / 2, VIEW_H + 110, v.butt, now, L);
   // controls hints next to the cheeks
   const touch = v.touch;
-  keycap(ctx, W / 2 - 160, VIEW_H + 120, touch ? (L === 'cs' ? '← ťuk' : '← tap') : 'A / ←', 410);
-  text(ctx, L === 'cs' ? 'SKOK ↑' : 'JUMP ↑', W / 2 - 160, VIEW_H + 156, 22, '#2a7de1');
-  keycap(ctx, W / 2 + 160, VIEW_H + 120, touch ? (L === 'cs' ? 'drž →' : 'hold →') : 'D / →', 411);
-  text(ctx, L === 'cs' ? 'DRŽ = PODLEZ ↓' : 'HOLD = DUCK ↓', W / 2 + 160, VIEW_H + 156, 20, '#e2574c');
+  keycap(W / 2 - 158, VIEW_H + 116, touch ? (L === 'cs' ? '← ťuk' : '← tap') : 'A / ←');
+  text(0, L === 'cs' ? 'SKOK ↑' : 'JUMP ↑', W / 2 - 158, VIEW_H + 158, 20, '#2a7de1');
+  keycap(W / 2 + 158, VIEW_H + 116, touch ? (L === 'cs' ? 'drž →' : 'hold →') : 'D / →');
+  text(0, L === 'cs' ? 'DRŽ = PODLEZ ↓' : 'HOLD = DUCK ↓', W / 2 + 158, VIEW_H + 158, 18, '#e2574c');
 
   // left: map + progress
   if (v.map) {
-    text(ctx, `${v.map.id}. ${v.map.name[L]}`, 80, VIEW_H + 40, 28, INK, 'left');
+    text(0, `${v.map.id}. ${v.map.name[L]}`, 80, VIEW_H + 40, 24, INK, 'left');
     const p = Math.max(0, Math.min(1, (v.sim ? v.sim.x : 0) / v.map.length));
-    rect(ctx, 80, VIEW_H + 66, 200, 18, 420, '#fff');
-    if (p > 0) { ctx.fillStyle = '#7bc142'; ctx.fillRect(83, VIEW_H + 69, 194 * p, 12); }
-    if (v.bestProgress) line(ctx, 83 + 194 * v.bestProgress, VIEW_H + 62, 83 + 194 * v.bestProgress, VIEW_H + 88, 421, 0.5, '#e2574c', 2);
-    text(ctx, `${Math.floor(p * 100)} %`, 290, VIEW_H + 76, 20, INK, 'left');
-    if (v.watchName) text(ctx, (L === 'cs' ? 'Záznam: ' : 'Replay: ') + v.watchName, 80, VIEW_H + 110, 22, '#3d5a8c', 'left');
-    else text(ctx, (L === 'cs' ? 'Pokus #' : 'Attempt #') + (v.attempt || 1), 80, VIEW_H + 110, 22, '#666', 'left');
-    if (v.ghostOn) { drawMouse(ctx, 86, VIEW_H + 168, { ghost: true, alpha: 0.6, t: 0 }); text(ctx, (L === 'cs' ? 'duch = tvůj rekord' : 'ghost = your best'), 128, VIEW_H + 158, 18, '#3d5a8c', 'left'); }
+    rect(0, 80, VIEW_H + 64, 200, 20, 0, '#fff', INK);
+    if (p > 0) { box(84, VIEW_H + 68, 192 * p, 12, '#7bc142'); box(84, VIEW_H + 68, 192 * p, 4, '#a8e07a'); }
+    if (v.bestProgress) box(83 + 194 * v.bestProgress, VIEW_H + 60, 4, 28, '#e2574c');
+    text(0, `${Math.floor(p * 100)} %`, 292, VIEW_H + 74, 20, INK, 'left');
+    if (v.watchName) text(0, (L === 'cs' ? 'Záznam: ' : 'Replay: ') + v.watchName, 80, VIEW_H + 110, 20, '#3d5a8c', 'left');
+    else text(0, (L === 'cs' ? 'Pokus #' : 'Attempt #') + (v.attempt || 1), 80, VIEW_H + 110, 20, '#6b6680', 'left');
+    if (v.ghostOn) { drawMouse(0, 86, VIEW_H + 168, { ghost: true, alpha: 0.6, t: 0 }); text(0, (L === 'cs' ? 'duch = tvůj rekord' : 'ghost = your best'), 128, VIEW_H + 156, 16, '#3d5a8c', 'left'); }
   }
   // right: score
   if (v.sim) {
     const sc = v.score || 0;
-    text(ctx, String(sc), W - 80, VIEW_H + 44, 44, INK, 'right');
-    drawCheese(ctx, W - 250, VIEW_H + 90, false, 1, 0, 0.9);
-    text(ctx, `× ${v.sim.cheese}`, W - 228, VIEW_H + 92, 24, INK, 'left');
-    if (v.sim.gold) { drawCheese(ctx, W - 160, VIEW_H + 90, true, 2, 0, 0.9); text(ctx, `× ${v.sim.gold}`, W - 138, VIEW_H + 92, 24, INK, 'left'); }
-    drawSalmon(ctx, W - 248, VIEW_H + 124, 3, 0, 0.75);
-    text(ctx, `× ${v.sim.salmon}/${C.SALMON_PER_MAP}`, W - 226, VIEW_H + 126, 24, v.sim.salmon === C.SALMON_PER_MAP ? '#e2574c' : INK, 'left');
-    text(ctx, (L === 'cs' ? 'těsně: ' : 'close: ') + v.sim.close, W - 120, VIEW_H + 126, 20, '#666', 'left');
-    if (v.best) text(ctx, (L === 'cs' ? 'rekord: ' : 'best: ') + v.best, W - 80, VIEW_H + 154, 20, '#666', 'right');
+    text(0, String(sc), W - 80, VIEW_H + 42, 40, INK, 'right');
+    drawCheese(0, W - 250, VIEW_H + 90, false, 1, 0, 0.9);
+    text(0, `× ${v.sim.cheese}`, W - 228, VIEW_H + 92, 20, INK, 'left');
+    if (v.sim.gold) { drawCheese(0, W - 160, VIEW_H + 90, true, 2, 0, 0.9); text(0, `× ${v.sim.gold}`, W - 138, VIEW_H + 92, 20, INK, 'left'); }
+    drawSalmon(0, W - 248, VIEW_H + 126, 3, 0, 0.75);
+    text(0, `× ${v.sim.salmon}/${C.SALMON_PER_MAP}`, W - 226, VIEW_H + 126, 20, v.sim.salmon === C.SALMON_PER_MAP ? '#e2574c' : INK, 'left');
+    text(0, (L === 'cs' ? 'těsně: ' : 'close: ') + v.sim.close, W - 130, VIEW_H + 126, 16, '#6b6680', 'left');
+    if (v.best) text(0, (L === 'cs' ? 'rekord: ' : 'best: ') + v.best, W - 80, VIEW_H + 156, 16, '#6b6680', 'right');
   }
 }
 
 // ---------------- main entry ----------------
+let lastNow = 0;
 // v: { map, sim, ghost, camX, lang, fx[], butt, catSay, end, mode, ... }
 export function render(ctx, v, now) {
-  setBoil(now);
+  target(main);
   const th = THEMES[v.map ? v.map.theme : 'kitchen'];
-  ctx.save();
-  if (v.shake > 0) ctx.translate((hash(now | 0) - 0.5) * v.shake, (hash((now | 0) + 1) - 0.5) * v.shake);
-  background(ctx, th, v.camX, now);
+  const camX = Math.round(v.camX * K) / K; // whole frame pixels: the world never shimmers between pixels
+  save();
+  if (v.shake > 0) translate(Math.round((hash(now | 0) - 0.5) * v.shake / 2) * 2, Math.round((hash((now | 0) + 1) - 0.5) * v.shake / 2) * 2);
+  paper(th, camX);
+  decor(th, camX, now);
   if (v.map) {
-    const map = v.map, camX = v.camX;
-    drawGround(ctx, map, th, camX);
-    for (const sg of map.signs || []) drawSign(ctx, sg, v.lang, camX, v.touch);
-    map.solids.forEach((o, i) => drawSolid(ctx, o, th, camX, i));
-    map.spikes.forEach((s, i) => drawSpike(ctx, s, th, camX, i));
+    const map = v.map;
+    drawGround(map, th, camX);
+    for (const sg of map.signs || []) drawSign(sg, v.lang, camX, v.touch);
+    for (const o of map.solids) drawSolid(o, th, camX);
+    for (const s of map.spikes) drawSpike(s, th, camX);
     map.items.forEach((it, i) => {
       if (v.sim && v.sim.collected[i]) return;
       const x = it.x - camX; if (x < -30 || x > W + 30) return;
-      if (it.kind === 'salmon') drawSalmon(ctx, x, it.y, i, now);
-      else if (i === v.goldIdx && !(v.sim && v.sim.collected[i])) drawGoldfish(ctx, x, it.y, now, now - (v.goldAt || 0));
+      if (it.kind === 'salmon') drawSalmon(0, x, it.y, i, now);
+      else if (i === v.goldIdx && !(v.sim && v.sim.collected[i])) drawGoldfish(x, it.y, now, now - (v.goldAt || 0));
       else if (v.sim && i === v.sim.bonusIdx) { // this run's bonus salmon, on a blue glow
-        ctx.fillStyle = 'rgba(120,190,255,0.35)'; ctx.beginPath(); ctx.arc(x, it.y, 22 + Math.sin(now / 180) * 3, 0, Math.PI * 2); ctx.fill();
-        drawSalmon(ctx, x, it.y, i, now, 0.8);
-      } else drawCheese(ctx, x, it.y, it.kind === 'gold', i, now);
+        oval(x, it.y, 22 + Math.round(Math.sin(now / 180)) * 2, 22 + Math.round(Math.sin(now / 180)) * 2, 'rgba(120,190,255,0.35)');
+        drawSalmon(0, x, it.y, i, now, 0.8);
+      } else drawCheese(0, x, it.y, it.kind === 'gold', i, now);
     });
-    drawFoils(ctx, map, v.sim, camX);
-    drawFinish(ctx, map, camX, now, v.end ? v.end.trap : 0);
+    drawFoils(map, v.sim, camX);
+    drawFinish(map, camX, now, v.end ? v.end.trap : 0);
   }
   // ghost
-  if (v.ghost && !v.ghost.done) drawMouse(ctx, v.ghost.x - v.camX, v.ghost.by, { duck: v.ghost.duck > 0, t: now, ghost: true, alpha: 0.45, air: !v.ghost.onGround });
+  if (v.ghost && !v.ghost.done) drawMouse(0, v.ghost.x - camX, v.ghost.by, { duck: v.ghost.duck > 0, t: now, ghost: true, alpha: 0.45, air: !v.ghost.onGround });
   // mouse
-  if (v.mouse && v.mouse.visible) drawMouse(ctx, v.mouse.x - v.camX, v.mouse.by, { duck: v.mouse.duck, t: now, dead: v.mouse.dead, air: v.mouse.air, scared: v.mouse.scared });
+  if (v.mouse && v.mouse.visible) drawMouse(0, v.mouse.x - camX, v.mouse.by, { duck: v.mouse.duck, t: now, dead: v.mouse.dead, air: v.mouse.air, scared: v.mouse.scared });
   // jumps left (max 2 until landing), shown while airborne
   if (v.sim && v.mouse && v.mouse.visible && !v.end && !v.sim.onGround && !v.sim.dead) {
-    const left = C.MAX_JUMPS - v.sim.jumps, mx = v.mouse.x - v.camX + 15, my = v.mouse.by - (v.mouse.duck ? C.DUCK_H : C.MOUSE_H) - 14;
-    for (let k = 0; k < C.MAX_JUMPS; k++) {
-      ctx.beginPath(); ctx.arc(mx - 6 + k * 12, my, 4, 0, Math.PI * 2);
-      ctx.fillStyle = k < left ? '#2a7de1' : 'rgba(255,255,255,0.8)'; ctx.fill();
-      ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.stroke();
-    }
+    const left = C.MAX_JUMPS - v.sim.jumps, mx = v.mouse.x - camX + 15, my = v.mouse.by - (v.mouse.duck ? C.DUCK_H : C.MOUSE_H) - 14;
+    for (let k = 0; k < C.MAX_JUMPS; k++) rect(0, mx - 10 + k * 14, my - 4, 8, 8, 0, k < left ? '#2a7de1' : '#ffffff', INK);
   }
   if (v.end && v.end.trap >= 1) {
-    const tx = v.map.length + TRAP_OFFSET - v.camX;
-    trapBar(ctx, tx, 1);
-    if (now % 600 < 400) text(ctx, 'SNAP!', tx + 10, G - 70, 30, '#e2574c', 'center', '#fff', -0.15);
+    const tx = v.map.length + TRAP_OFFSET - camX;
+    trapBar(0, tx, 1);
+    if (now % 600 < 400) text(0, 'SNAP!', tx + 10, G - 70, 30, '#e2574c', 'center', '#fff');
   }
   // particles / floating texts
   for (const p of v.fx) {
-    const x = p.x - (p.screen ? 0 : v.camX);
+    const x = p.x - (p.screen ? 0 : camX);
     const a = Math.max(0, 1 - p.age / p.life);
-    ctx.save(); ctx.globalAlpha = a;
-    if (p.kind === 'text') text(ctx, p.text, x, p.y, p.size || 24, p.color || INK, 'center', '#fff');
-    else if (p.kind === 'star') star(ctx, x, p.y, p.r || 6, p.seed || 1, p.color || '#ffd23f');
-    else if (p.kind === 'dot') { ctx.fillStyle = p.color || INK; ctx.beginPath(); ctx.arc(x, p.y, p.r || 3, 0, Math.PI * 2); ctx.fill(); }
-    ctx.restore();
+    save(); alpha(a);
+    if (p.kind === 'text') text(0, p.text, x, p.y, p.size || 24, p.color || INK, 'center', '#fff');
+    else if (p.kind === 'star') star(0, x, p.y, p.r || 6, 0, p.color || '#ffd23f');
+    else if (p.kind === 'dot') disc(x, p.y, p.r || 3, p.color || INK);
+    restore();
   }
-  ctx.restore();
-  if (v.hud) hudPanel(ctx, v, now);
+  restore();
+  // pixelfx one-shots, in frame pixels
+  const dt = Math.min(0.05, Math.max(0, (now - lastNow) / 1000)); lastNow = now;
+  const fr = frame();
+  if (live.length) fr.light.fill(0);
+  for (let i = live.length - 1; i >= 0; i--) {
+    const e = live[i];
+    e.fx.update(dt);
+    e.fx.options.x = Math.round((e.x - (e.screen ? 0 : camX)) * K); e.fx.options.y = Math.round(e.y * K);
+    e.fx.draw(fr);
+    if (e.fx.done()) live.splice(i, 1);
+  }
+  const lit = live.length > 0;
+  if (v.hud) hudPanel(v, now);
   else { // menus: plain paper strip with the butt for decoration
-    ctx.fillStyle = '#fffaf0'; ctx.fillRect(0, VIEW_H, W, H - VIEW_H);
-    line(ctx, 0, VIEW_H + 2, W, VIEW_H + 2, 400, 1.5, INK, 2.4);
-    drawButt(ctx, W / 2, VIEW_H + 110, v.butt, now, v.lang);
+    box(0, VIEW_H, W, H - VIEW_H, '#fffaf0');
+    box(0, VIEW_H, W, 6, INK);
+    drawButt(0, W / 2, VIEW_H + 110, v.butt, now, v.lang);
   }
   // what the cat says, next to its head in the bottom panel
   if (v.catSay && !v.leap) {
     const age = now - v.catSay.at;
-    bubble(ctx, W / 2 + 120, VIEW_H - 22, v.catSay.text, v.catSay.color, 500, v.catSay.hold ? Math.min(age, 300) : age);
+    bubble(W / 2 + 130, VIEW_H - 26, v.catSay.text, v.catSay.color, v.catSay.hold ? Math.min(age, 300) : age);
   }
   // finale: the cat we've been slapping leaps out of the panel onto the trap
   if (v.leap) {
     const L = v.leap, p = L.p;
-    const fromX = W / 2, fromY = VIEW_H + 110, toX = L.trapX - v.camX, toY = G - 30;
+    const fromX = W / 2, fromY = VIEW_H + 110, toX = L.trapX - camX, toY = G - 30;
     const e = p < 1 ? p * p * (3 - 2 * p) : 1;
     const x = fromX + (toX - fromX) * e, y = fromY + (toY - fromY) * e - Math.sin(p * Math.PI) * 170;
     const sc = 0.8 + (0.5 - 0.8) * e;
     const wig = L.eat ? Math.sin(L.eat * Math.PI * 2) * 0.12 : 0;
-    drawButt(ctx, x, y + (L.eat ? -Math.abs(Math.sin(L.eat * Math.PI)) * 6 : 0), v.butt, now, v.lang, sc, { fat: L.fat, rot: (p < 1 ? (0.5 - p) * 0.5 : 0) + wig, noHands: true });
+    drawButt(0, x, y + (L.eat ? -Math.abs(Math.sin(L.eat * Math.PI)) * 6 : 0), v.butt, now, v.lang, sc, { fat: L.fat, rot: (p < 1 ? (0.5 - p) * 0.5 : 0) + wig, noHands: true });
   }
   if (v.banner) {
     const age = now - v.banner.at;
     if (age < v.banner.life) {
-      const s = age < 120 ? age / 120 : 1;
-      ctx.save(); ctx.translate(W / 2, 150); ctx.scale(s, s);
-      text(ctx, v.banner.text, 0, 0, v.banner.size || 64, v.banner.color || INK, 'center', '#fff', -0.04);
-      if (v.banner.sub) text(ctx, v.banner.sub, 0, 52, 28, INK, 'center', '#fff');
-      ctx.restore();
+      const s = age < 120 ? 0.5 + (age / 120) * 0.5 : 1;
+      save(); translate(W / 2, 150); scale(s, s);
+      text(0, v.banner.text, 0, 0, v.banner.size || 64, v.banner.color || INK, 'center', '#fff');
+      if (v.banner.sub) text(0, v.banner.sub, 0, 52, 26, INK, 'center', '#fff');
+      restore();
     }
   }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  present(ctx, ctx.canvas.width, ctx.canvas.height, lit, composite);
 }
 
-export { drawCheese };
+// market preview: the cat's behind and the running mouse in their own small frame (520 x 440 units)
+const PREV = createFrame(260, 220);
+export function renderPreview(ctx, cat, mouse, now, lang) {
+  target(PREV);
+  PREV.color.fill(0);
+  drawButt(0, 260, 220, { left: -1e6, right: -1e6, rightHeld: false }, now, lang, 1.15, { cat });
+  save(); translate(190, 425); scale(3, 3);
+  drawMouse(0, 0, 0, { t: now, pal: mouse });
+  restore();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  present(ctx, ctx.canvas.width, ctx.canvas.height, false);
+  target(main);
+}
+
+export { drawCheese, PW, PH };

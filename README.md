@@ -17,7 +17,7 @@ Single player: everyone plays on their own, but everyone sees the same leaderboa
 - Touching anything else (beam, pipe, spikes, a hole) ends the run too.
 - `Esc` / `P` pauses, `R` restarts; gamepad LB / RB
 
-20 maps in hand-drawn coloured sketch style, as rooms of five houses: a country cottage, a city tower block, a poor
+20 maps in pixel art, as rooms of five houses: a country cottage, a city tower block, a poor
 quarter, the city centre and a luxury villa (ending on the cat throne). From the living room on, foil balls roll at
 the mouse, pop out of crates or drop from above. Each map unlocks the next one, has its own
 leaderboard, and the overall leaderboard sums every player's best score on every map.
@@ -146,7 +146,7 @@ shared/sim.js      deterministic game engine (browser + server)
 shared/maps.json   the 20 maps and 5 houses (generated, then frozen)
 shared/solver.js   brute-force solver: proves every map is beatable (tools/tests only, not served)
 server/server.js   static files + JSON API + SQLite (node:sqlite)
-public/            index.html, style.css, js/ (game, sketch renderer, Web Audio synth, UI)
+public/            index.html, style.css, js/ (game, pixel renderer, Web Audio synth, UI), vendor/pixelfx (effects)
 tools/gen-maps.js  map generator: pattern pools + seeds, picks seeds whose difficulty fits a band
 test/              node --test: engine, all maps solvable, API
 ```
@@ -186,4 +186,4 @@ The cat voices and the slap are short CC0 recordings in `public/sounds/` (listed
 npm test
 ```
 
-Font: Patrick Hand (SIL OFL, see `public/fonts/OFL.txt`). Sounds and other credits: `CREDITS.md`.
+Font: Pixelify Sans (SIL OFL, see `public/fonts/OFL.txt`). Effects: pixelfx (MIT). Sounds and other credits: `CREDITS.md`.

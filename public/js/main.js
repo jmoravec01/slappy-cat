@@ -1,6 +1,6 @@
 // App shell: screens, input, accounts, leaderboards, results.
 import { Game } from './game.js';
-import { W, H, SKIN, drawButt, drawMouse } from './render.js';
+import { W, H, SKIN, renderPreview } from './render.js';
 import { SKINS, SKIN_BY_ID, PATTERNS, DEFAULT } from '../shared/skins.js';
 import { bonusItem } from '../shared/sim.js';
 import * as audio from './audio.js';
@@ -422,14 +422,9 @@ function shopPreview(now) {
   if (screen !== 'shop') return;
   requestAnimationFrame(shopPreview);
   const cv = $('#shop-preview'), c = cv.getContext('2d'), sel = SKIN_BY_ID.get(shopSel);
-  const px = Math.round(260 * uiZoom * Math.min(window.devicePixelRatio || 1, 3)); // as many pixels as it covers
-  if (cv.width !== px) { cv.width = px; cv.height = Math.round(px * 440 / 520); }
-  c.setTransform(cv.width / 520, 0, 0, cv.width / 520, 0, 0); c.clearRect(0, 0, 520, 440);
+  if (cv.width !== 260) { cv.width = 260; cv.height = 220; } // pixel art: one canvas pixel per art pixel, scaled up by CSS
   const cat = sel && sel.kind === 'cat' ? sel : SKIN.cat, mouse = sel && sel.kind === 'mouse' ? sel : SKIN.mouse;
-  drawButt(c, 260, 220, { left: -1e6, right: -1e6, rightHeld: false }, now, lang, 1.15, { cat: cat || { hex: '#f39c34', dark: '#c96f1c' } });
-  c.save(); c.translate(190, 425); c.scale(3, 3);
-  drawMouse(c, 0, 0, { t: now, pal: mouse || { hex: '#b8b2c8' } });
-  c.restore();
+  renderPreview(c, cat || { hex: '#f39c34', dark: '#c96f1c' }, mouse || { hex: '#b8b2c8' }, now, lang);
 }
 
 $('#shop-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-kind]'); if (b) { shopKind = b.dataset.kind; shopSel = null; renderShop(); } });
@@ -575,7 +570,7 @@ window.addEventListener('blur', () => { releaseAll(); if (screen === 'play' && g
 // ---------------- boot ----------------
 (async function boot() {
   applyLang();
-  try { await document.fonts.load('20px "Patrick Hand"'); } catch { /* fine */ }
+  try { await document.fonts.load('20px "Pixelify Sans"'); } catch { /* fine */ }
   for (let attempt = 0; attempt < 3 && !MAPS.length; attempt++) {
     try {
       const res = await fetch('shared/maps.json');

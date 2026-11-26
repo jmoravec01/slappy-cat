@@ -1,11 +1,17 @@
 # Credits
 
-All graphics are drawn in code (`public/js/render.js`, `public/js/sketch.js`); the music and the fallback sound
+All graphics are drawn in code as pixel art (`public/js/render.js`, `public/js/pixel.js`); the music and the fallback sound
 effects are synthesised with Web Audio. Third-party assets:
+
+## Effects
+
+Pixel effects (pickup bursts, hits, poof, confetti) and the 5x7 pixel font from pixelfx by Patch
+(https://github.com/patch-gg/pixelfx), MIT licence: `public/vendor/pixelfx/LICENSE`. Parts of pixelfx adapt
+Hugo Duprez's MIT effects.
 
 ## Font
 
-Patrick Hand by Patrick Wagesreiter, SIL Open Font License 1.1 (subset): `public/fonts/OFL.txt`.
+Pixelify Sans by The Pixelify Sans Project Authors (https://github.com/eifetx/Pixelify-Sans), SIL Open Font License 1.1 (subset, weight 500): `public/fonts/OFL.txt`.
 
 ## Sounds
 

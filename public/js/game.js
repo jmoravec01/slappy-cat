@@ -1,6 +1,6 @@
 // Game session: fixed-step simulation, input log, camera, effects, end scene.
 import { C, ACT, prepareMap, createSim, step, scoreOf } from '../shared/sim.js';
-import { render, W, MOUSE_SCREEN_X, TRAP_OFFSET } from './render.js';
+import { render, W, MOUSE_SCREEN_X, TRAP_OFFSET, spawnFx, clearFx } from './render.js';
 import * as audio from './audio.js';
 
 const STEP = 1000 / C.TICK_RATE;
@@ -74,6 +74,7 @@ export class Game {
     this.v.catSay = null;
     this.v.camX = this.sim.x - MOUSE_SCREEN_X;
     this.v.fx.length = 0;
+    clearFx();
     this.v.attempt = this.attempt;
     this.v.bestProgress = this.bestProgress / this.map.length;
     this.v.score = 0;
@@ -220,11 +221,13 @@ export class Game {
       this.fx({ kind: 'text', x: e.x, y: e.y - 18, vy: -0.05, text: this.t('LOSOS! +1000', 'SALMON! +1000'), color: '#e2574c', life: 1200, size: 34 });
       for (let i = 0; i < 12; i++) this.fx({ kind: 'star', x: e.x, y: e.y, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.9) * 0.4, life: 700, r: 6, seed: i, color: i % 2 ? '#ff8c69' : '#ffd23f' });
       this.v.catSay = { text: this.t('LOSOS!!', 'SALMON!!'), color: '#e2574c', at: now };
+      if (!quiet) spawnFx('burst', e.x, e.y, { palette: ['#2a0a08', '#5c1a10', '#9a3420', '#d9503a', '#ff8c69', '#ffb39a', '#ffe0d4', '#ffffff'] });
     } else if (e.t === 'item' && e.idx === this.v.goldIdx) {
       if (!quiet) { audio.sfx('gold'); audio.sfx('salmon'); }
       this.fx({ kind: 'text', x: e.x, y: e.y - 16, vy: -0.04, text: this.t('ZLATÁ RYBKA! 🐟 +10', 'GOLDFISH! 🐟 +10'), color: '#e08a00', life: 1600, size: 34 });
       for (let i = 0; i < 16; i++) this.fx({ kind: 'star', x: e.x, y: e.y, vx: (Math.random() - 0.5) * 0.7, vy: (Math.random() - 0.9) * 0.45, life: 900, r: 7, seed: i, color: i % 2 ? '#ffd23f' : '#fff6b0' });
       this.v.catSay = { text: this.t('ZLATÁ!!', 'GOLD!!'), color: '#e08a00', at: now };
+      if (!quiet) spawnFx('burst', e.x, e.y, { palette: ['#2a1405', '#5c3008', '#9a5a0e', '#d48e18', '#f5b92c', '#ffde5e', '#fff4bc', '#ffffff'] });
     } else if (e.t === 'item' && e.bonus) {
       if (!quiet) audio.sfx('salmon');
       this.fx({ kind: 'text', x: e.x, y: e.y - 14, vy: -0.05, text: this.t('BONUS 🐟 +1', 'BONUS 🐟 +1'), color: '#2a7de1', life: 1100, size: 28 });
@@ -248,6 +251,8 @@ export class Game {
       audio.sfx('die');
       this.v.shake = 12;
       this.v.mouse.dead = true;
+      spawnFx('crit', this.sim.x + 15, this.sim.by - 12);
+      spawnFx('poof', this.sim.x + 15, this.sim.by);
       for (let i = 0; i < 10; i++) this.fx({ kind: 'star', x: this.sim.x + 15, y: this.sim.by - 12, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.7) * 0.5, life: 650, r: 6, seed: i });
       const msgs = this.t(['Au!', 'Pííp!', 'Jejda!', 'Kňuk!'], ['Ouch!', 'Squeak!', 'Oops!', 'Eek!']);
       this.fx({ kind: 'text', x: this.sim.x + 15, y: this.sim.by - 60, vy: -0.03, text: msgs[this.attempt % msgs.length], color: '#e2574c', life: 800, size: 34 });
@@ -264,6 +269,7 @@ export class Game {
       this.v.end = { trap: 0 };
       this.endState = { mouseX: this.sim.x, snapped: false, jumped: false, chomps: 0, burped: false, done: false };
       this.banner(this.t('CÍL!', 'FINISH!'), null, 1100, 72, '#2a9d4b');
+      spawnFx('confetti', W / 2, G, {}, true);
     }
   }
 
@@ -288,6 +294,7 @@ export class Game {
       v.mouse.x = es.mouseX; v.mouse.by = Math.min(G, v.mouse.by + 0.4 * dt); v.mouse.duck = false; v.mouse.air = v.mouse.by < G;
     } else if (!es.snapped) {
       es.snapped = true; es.snapAt = now; audio.sfx('snap'); v.shake = 8; v.mouse.dead = true;
+      spawnFx('thud', stopX + 20, G - 4);
       for (let i = 0; i < 6; i++) this.fx({ kind: 'star', x: stopX + 20, y: G - 30, vx: (Math.random() - 0.5) * 0.5, vy: -Math.random() * 0.4, life: 600, r: 6, seed: i });
     }
     if (es.snapped) {
